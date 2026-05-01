@@ -163,6 +163,8 @@ def menu():
          f"{RED}[1]{END} {GREEN}Monitor ON   {END}{RED}[2]{END} {GREEN}Monitor OFF   {END}{RED}[5]{END} {GREEN}Escanear{END}"),
         ("[12] MAC Spoof   [20] Dependencias  [6] Scan Vivo",
          f"{RED}[12]{END} {GREEN}MAC Spoof   {END}{RED}[20]{END} {CYAN}Dependencias  {END}{RED}[6]{END} {GREEN}Scan Vivo{END}"),
+        ("[37] Setup Adaptador  [38] Lista adaptadores soportados",
+         f"{RED}[37]{END} {GREEN}Setup Adaptador  {END}{RED}[38]{END} {GREEN}Lista adaptadores soportados{END}"),
         ("[29] Historial   [30] Reporte HTML   [0] Salir",
          f"{RED}[29]{END} {CYAN}Historial   {END}{RED}[30]{END} {CYAN}Reporte HTML   {END}{RED}[0]{END} {RED}Salir{END}"),
     ]

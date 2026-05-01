@@ -37,6 +37,39 @@ dependencias() {
     info "Actualizando repositorios..."
     sudo apt-get update -qq
 
+    echo -e "\n${WHITE}─── DRIVERS ADAPTADORES WiFi ──────────────────${END}"
+    # Prerequisitos para compilar drivers
+    instalar dkms              "Dynamic Kernel Module Support"
+    instalar build-essential   "compilador gcc/make"
+    LOCAL_HEADERS="linux-headers-$(uname -r)"
+    info "Instalando: ${WHITE}${LOCAL_HEADERS}${END}  ${DIM}headers del kernel actual${END}"
+    if sudo apt-get install -y "$LOCAL_HEADERS" -qq 2>/dev/null; then
+        ok "${LOCAL_HEADERS} instalado."
+    else
+        warn "Headers no disponibles. Puede que no se puedan compilar drivers."
+    fi
+
+    # Drivers para adaptadores comunes
+    instalar firmware-atheros  "TP-Link TL-WN722N v1 / Alfa AWUS036NHA (AR9271)"
+    instalar rfkill            "desbloquear adaptadores USB"
+
+    # realtek-rtl88xxau-dkms: TP-Link TL-WN722N v2/v3, Alfa AWUS036ACH, T2U, T3U
+    if apt-cache show realtek-rtl88xxau-dkms &>/dev/null; then
+        instalar realtek-rtl88xxau-dkms "TP-Link TL-WN722N v2/v3, Alfa AWUS036ACH, Archer T2U"
+    else
+        warn "realtek-rtl88xxau-dkms no en repos. Instalando rtl8188eus desde GitHub..."
+        if ! lsmod | grep -q 8188eu && ! lsmod | grep -q rtl8812au; then
+            sudo git clone https://github.com/aircrack-ng/rtl8188eus /tmp/rtl8188eus 2>/dev/null
+            if [ -d /tmp/rtl8188eus ]; then
+                (cd /tmp/rtl8188eus && sudo make && sudo make install) 2>/dev/null && \
+                    ok "rtl8188eus (TL-WN722N v2/v3) instalado." || \
+                    warn "No se pudo compilar rtl8188eus. Inténtalo manualmente."
+            fi
+        else
+            ok "Driver Realtek ya cargado en el sistema."
+        fi
+    fi
+
     echo -e "\n${WHITE}─── NÚCLEO WiFi ───────────────────────────────${END}"
     instalar aircrack-ng     "airmon, airodump, aireplay, aircrack"
     instalar wireless-tools  "iwconfig, iwlist"

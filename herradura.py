@@ -5168,6 +5168,336 @@ def exploit_engine_bulk():
 # Menú principal
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ═════════════════════════════════════════════════════════════════════════════
+#  MÓDULO 37 — SETUP DE ADAPTADORES WiFi
+#  Detecta el adaptador USB, identifica chipset, instala driver y verifica
+#  compatibilidad con modo monitor.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Base de datos de adaptadores WiFi USB conocidos
+# Formato: "idVendor:idProduct" -> (nombre_comercial, chipset, driver_modulo, repo_dkms, apt_pkg)
+_ADAPTERS_DB = {
+    # ── TP-Link ────────────────────────────────────────────────────────────────
+    "0cf3:9271": ("TP-Link TL-WN722N v1",        "Atheros AR9271",    "ath9k_htc",  None,                                          "firmware-atheros"),
+    "2357:010c": ("TP-Link TL-WN722N v2/v3",     "Realtek RTL8188EUS","8188eu",     "https://github.com/aircrack-ng/rtl8188eus",   "realtek-rtl88xxau-dkms"),
+    "2357:0108": ("TP-Link TL-WN722N v2",        "Realtek RTL8188EUS","8188eu",     "https://github.com/aircrack-ng/rtl8188eus",   "realtek-rtl88xxau-dkms"),
+    "2357:0101": ("TP-Link TL-WN821N",           "Realtek RTL8192CU", "rtl8192cu",  None,                                          None),
+    "2357:0115": ("TP-Link Archer T2U",          "Realtek RTL8811AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+    "2357:0120": ("TP-Link Archer T2U Plus",     "Realtek RTL8812AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+    "2357:011e": ("TP-Link Archer T3U",          "Realtek RTL8812BU", "rtl88x2bu",  "https://github.com/morrownr/88x2bu",          None),
+    "2357:0138": ("TP-Link Archer T3U Plus",     "Realtek RTL8812BU", "rtl88x2bu",  "https://github.com/morrownr/88x2bu",          None),
+    "2357:012d": ("TP-Link TL-WN823N v2",        "Realtek RTL8192EU", "rtl8192eu",  None,                                          None),
+    "2357:0107": ("TP-Link TL-WN725N v2",        "Realtek RTL8188EUS","8188eu",     "https://github.com/aircrack-ng/rtl8188eus",   None),
+    # ── Alfa Networks ─────────────────────────────────────────────────────────
+    "0bda:8812": ("Alfa AWUS036ACH",             "Realtek RTL8812AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+    "0cf3:7015": ("Alfa AWUS036H",               "Atheros AR7010",    "ath9k_htc",  None,                                          "firmware-atheros"),
+    "0bda:a811": ("Alfa AWUS036ACS",             "Realtek RTL8811AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+    "0bda:881a": ("Alfa AWUS036ACM",             "Realtek RTL8812AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+    # ── Realtek genéricos ──────────────────────────────────────────────────────
+    "0bda:8179": ("Realtek RTL8188ETV",          "Realtek RTL8188ETV","rtl8188eu",  None,                                          None),
+    "0bda:b812": ("Realtek RTL8812BU",           "Realtek RTL8812BU", "rtl88x2bu",  "https://github.com/morrownr/88x2bu",          None),
+    "0bda:c811": ("Realtek RTL8811CU",           "Realtek RTL8811CU", "rtl8821cu",  "https://github.com/morrownr/8821cu",          None),
+    "0bda:8176": ("Realtek RTL8188CUS",          "Realtek RTL8188CUS","rtl8192cu",  None,                                          None),
+    "0bda:8187": ("Realtek RTL8187",             "Realtek RTL8187",   "rtl8187",    None,                                          None),
+    # ── Ralink / MediaTek ──────────────────────────────────────────────────────
+    "148f:5572": ("Panda PAU09 / Ralink RT5572", "Ralink RT5572",     "rt2800usb",  None,                                          None),
+    "148f:7601": ("MediaTek MT7601U",            "MediaTek MT7601U",  "mt7601u",    None,                                          None),
+    "148f:3070": ("Ralink RT3070",               "Ralink RT3070",     "rt2800usb",  None,                                          None),
+    "148f:5370": ("Ralink RT5370",               "Ralink RT5370",     "rt2800usb",  None,                                          None),
+    # ── D-Link / ASUS / otros ─────────────────────────────────────────────────
+    "2001:3319": ("D-Link DWA-131",              "Realtek RTL8192EU", "rtl8192eu",  None,                                          None),
+    "2001:3c1e": ("D-Link DWA-171",              "Realtek RTL8821AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+    "0b05:17d1": ("ASUS USB-N13",               "Ralink RT3072",     "rt2800usb",  None,                                          None),
+    "0b05:184c": ("ASUS USB-AC56",              "Realtek RTL8812AU", "rtl8812au",  "https://github.com/aircrack-ng/rtl8812au",    "realtek-rtl88xxau-dkms"),
+}
+
+# Notas específicas por chipset
+_CHIPSET_NOTES = {
+    "Realtek RTL8188EUS": (
+        "El TL-WN722N v2/v3 necesita el driver rtl8188eus.\n"
+        "  Modo monitor: la interfaz NO cambia de nombre (queda como wlan0).\n"
+        "  Comando monitor: ip link set wlan0 down && iw wlan0 set monitor none && ip link set wlan0 up"
+    ),
+    "Realtek RTL8812AU": (
+        "Driver rtl8812au compatible con Kali. Soporta 2.4GHz y 5GHz.\n"
+        "  Modo monitor: airmon-ng start wlan0 o método manual con iw."
+    ),
+    "Realtek RTL8812BU": (
+        "Driver rtl88x2bu. Requiere compilación con DKMS.\n"
+        "  Modo monitor: usar método manual (ip link + iw)."
+    ),
+    "Atheros AR9271": (
+        "Chipset nativo en Linux. Monitor mode funciona directamente.\n"
+        "  airmon-ng start wlan0 crea wlan0mon."
+    ),
+}
+
+def _detect_usb_wifi() -> list:
+    """Detecta adaptadores WiFi USB conectados via lsusb."""
+    lsusb_out = run("lsusb 2>/dev/null", capture=True) or ""
+    found = []
+    for line in lsusb_out.splitlines():
+        # Formato: Bus 001 Device 002: ID 0cf3:9271 Qualcomm Atheros Communications AR9271...
+        m = re.search(r'ID\s+([0-9a-f]{4}:[0-9a-f]{4})\s+(.*)', line, re.I)
+        if not m: continue
+        uid, desc = m.group(1).lower(), m.group(2).strip()
+        # Filtrar solo dispositivos WiFi/red (vendor IDs conocidos)
+        vendor = uid.split(":")[0]
+        if vendor in ("0cf3","2357","0bda","148f","2001","0b05","050d","07d1","0846","1737"):
+            found.append((uid, desc))
+        elif uid in _ADAPTERS_DB:
+            found.append((uid, desc))
+    return found
+
+
+def _install_driver_menu(uid: str, entry: tuple):
+    """Menú interactivo para instalar el driver de un adaptador."""
+    nombre, chipset, driver, repo, apt_pkg = entry
+
+    separador(f"INSTALAR DRIVER: {nombre}")
+    print(f"  {WHITE}Chipset:{END} {CYAN}{chipset}{END}")
+    print(f"  {WHITE}Driver: {END} {CYAN}{driver}{END}")
+
+    if chipset in _CHIPSET_NOTES:
+        print(f"\n  {YELLOW}[Nota]{END} {_CHIPSET_NOTES[chipset]}")
+
+    print(f"\n  {WHITE}Métodos de instalación disponibles:{END}")
+    opciones = []
+
+    # Método 1: apt
+    if apt_pkg:
+        print(f"  {GREEN}[1]{END} APT (recomendado): {CYAN}sudo apt install {apt_pkg}{END}")
+        opciones.append(("apt", apt_pkg))
+
+    # Método 2: DKMS desde git
+    if repo:
+        repo_name = repo.rstrip("/").split("/")[-1]
+        print(f"  {GREEN}[2]{END} DKMS desde GitHub: {CYAN}{repo}{END}")
+        opciones.append(("dkms", repo, repo_name))
+
+    # Método 3: driver ya instalado, solo probar
+    print(f"  {GREEN}[3]{END} Solo verificar si el driver ya está cargado")
+    print(f"  {GREEN}[0]{END} Cancelar")
+
+    sel = ask("Seleccione método")
+
+    if sel == "1" and ("apt", apt_pkg) in opciones[:1]:
+        info(f"Instalando {apt_pkg} via APT...")
+        run("apt-get update -qq 2>/dev/null")
+        run(f"apt-get install -y {apt_pkg} 2>&1")
+        run(f"modprobe {driver} 2>/dev/null")
+        ok("Driver instalado. Reconecta el adaptador si es necesario.")
+
+    elif sel == "2" and any(o[0] == "dkms" for o in opciones):
+        dkms_entry = next(o for o in opciones if o[0] == "dkms")
+        _, repo_url, repo_name = dkms_entry
+        info(f"Clonando {repo_url}...")
+        run(f"apt-get install -y dkms linux-headers-$(uname -r) 2>/dev/null")
+        run(f"git clone {repo_url} /tmp/{repo_name} 2>&1")
+
+        # Detectar método de instalación del repo
+        if os.path.exists(f"/tmp/{repo_name}/Makefile"):
+            run(f"cd /tmp/{repo_name} && make && make install 2>&1")
+        elif os.path.exists(f"/tmp/{repo_name}/install.sh"):
+            run(f"cd /tmp/{repo_name} && bash install.sh 2>&1")
+        else:
+            run(f"cd /tmp/{repo_name} && dkms add . 2>/dev/null && "
+                f"dkms build {repo_name}/1.0 2>/dev/null && "
+                f"dkms install {repo_name}/1.0 2>/dev/null")
+        run(f"modprobe {driver} 2>/dev/null")
+        ok("Driver instalado desde GitHub.")
+
+    elif sel == "3":
+        loaded = run(f"lsmod | grep {driver}", capture=True) or ""
+        if loaded.strip():
+            ok(f"Driver '{driver}' está cargado en el kernel.")
+        else:
+            warn(f"Driver '{driver}' NO está cargado.")
+            info(f"Intentando: modprobe {driver}")
+            run(f"modprobe {driver} 2>/dev/null")
+            loaded2 = run(f"lsmod | grep {driver}", capture=True) or ""
+            if loaded2.strip():
+                ok("Driver cargado correctamente.")
+            else:
+                error("No se pudo cargar el driver. Instálalo primero.")
+
+
+def setup_adapter():
+    """[37] Configuración de adaptadores WiFi — detección y driver automático."""
+    os.system("clear")
+    banner()
+    separador("SETUP DE ADAPTADORES WiFi")
+    print(f"""
+  {WHITE}Esta herramienta:{END}
+  {DIM}• Detecta todos los adaptadores WiFi USB conectados
+  • Identifica el chipset y el driver necesario
+  • Instala el driver automáticamente (apt o DKMS)
+  • Verifica compatibilidad con modo monitor
+  • Compatible con TP-Link, Alfa, Panda, D-Link, ASUS y más{END}
+
+  {WHITE}Adaptadores con soporte completo:{END}
+  {GREEN}TP-Link:{END}   TL-WN722N v1/v2/v3, Archer T2U, T3U, TL-WN823N
+  {GREEN}Alfa:   {END}   AWUS036ACH, AWUS036H, AWUS036ACS, AWUS036ACM
+  {GREEN}Otros:  {END}   Panda PAU09, D-Link DWA-131/171, ASUS USB-N13
+    """)
+
+    # ── Detectar adaptadores USB ───────────────────────────────────────────────
+    step(1, "Detectando adaptadores WiFi USB conectados")
+    usb_devs = _detect_usb_wifi()
+
+    if not usb_devs:
+        warn("No se detectaron adaptadores WiFi USB.")
+        tip("Asegúrate de que el adaptador esté conectado.")
+        tip("Prueba: lsusb | grep -i wireless")
+        pause_back(); return
+
+    # Mostrar todos los encontrados
+    separador("ADAPTADORES DETECTADOS")
+    reconocidos = []
+    no_reconocidos = []
+
+    for uid, desc in usb_devs:
+        if uid in _ADAPTERS_DB:
+            entry = _ADAPTERS_DB[uid]
+            reconocidos.append((uid, desc, entry))
+            nombre, chipset, driver, _, _ = entry
+            print(f"  {GREEN}[✔]{END} {WHITE}{uid}{END}  {CYAN}{nombre}{END}")
+            print(f"       {DIM}Chipset: {chipset}  Driver: {driver}{END}")
+        else:
+            no_reconocidos.append((uid, desc))
+            print(f"  {YELLOW}[?]{END} {WHITE}{uid}{END}  {DIM}{desc}{END}")
+
+    if no_reconocidos:
+        print(f"\n  {YELLOW}[!]{END} {len(no_reconocidos)} dispositivo(s) no reconocidos.")
+        tip("Pueden ser hubs USB, cámaras, etc. Si es tu adaptador WiFi, abre un issue en GitHub.")
+
+    if not reconocidos:
+        warn("Ningún adaptador reconocido en la base de datos.")
+        tip("Tu adaptador puede funcionar con drivers nativos de Linux.")
+        tip("Prueba: sudo airmon-ng start wlan0")
+        pause_back(); return
+
+    # ── Si hay varios, seleccionar ─────────────────────────────────────────────
+    if len(reconocidos) > 1:
+        print()
+        for i, (uid, desc, entry) in enumerate(reconocidos, 1):
+            print(f"  {WHITE}[{i}]{END} {entry[0]}  {DIM}({uid}){END}")
+        sel = ask("Seleccione adaptador a configurar")
+        if sel.isdigit() and 1 <= int(sel) <= len(reconocidos):
+            uid, desc, entry = reconocidos[int(sel)-1]
+        else:
+            uid, desc, entry = reconocidos[0]
+    else:
+        uid, desc, entry = reconocidos[0]
+
+    nombre, chipset, driver, repo, apt_pkg = entry
+    separador(f"CONFIGURANDO: {nombre}")
+
+    # ── Verificar driver actual ────────────────────────────────────────────────
+    step(2, "Verificando driver")
+    loaded = run(f"lsmod | grep {driver} 2>/dev/null", capture=True) or ""
+    if loaded.strip():
+        ok(f"Driver '{driver}' ya está cargado en el kernel.")
+        driver_ok = True
+    else:
+        warn(f"Driver '{driver}' no está cargado.")
+        driver_ok = False
+
+    # ── Verificar interfaz ─────────────────────────────────────────────────────
+    step(3, "Verificando interfaz de red")
+    ifaces = get_interfaces()
+    if ifaces:
+        ok(f"Interfaces detectadas: {', '.join(ifaces)}")
+        iface = ifaces[0]
+    else:
+        warn("No se detectó ninguna interfaz WiFi activa.")
+        iface = None
+
+    # ── Instalar driver si falta ───────────────────────────────────────────────
+    if not driver_ok or not iface:
+        print()
+        instalar = ask("¿Instalar/reparar driver automáticamente? (s/n)")
+        if instalar.lower() == "s":
+            _install_driver_menu(uid, entry)
+            time.sleep(2)
+            ifaces = get_interfaces()
+            iface = ifaces[0] if ifaces else None
+
+    # ── Probar modo monitor ────────────────────────────────────────────────────
+    step(4, "Probando compatibilidad con modo monitor")
+    if not iface:
+        error("Sin interfaz WiFi disponible. Reconecta el adaptador.")
+        pause_back(); return
+
+    tip(f"Intentando activar modo monitor en: {iface}")
+    sp = Spinner("Probando modo monitor...")
+    sp.start()
+    mon = _enable_monitor(iface)
+    sp.stop()
+
+    mode_chk = run(f"iw dev {mon} info 2>/dev/null | grep type", capture=True) or ""
+    if "monitor" in mode_chk:
+        ok(f"MODO MONITOR FUNCIONA en {CYAN}{mon}{END}")
+        print(f"\n  {GREEN}{'─'*50}{END}")
+        print(f"  {WHITE}Adaptador listo para usar con Herradura Hack.{END}")
+        print(f"  {DIM}Interfaz monitor: {mon}{END}")
+        print(f"  {DIM}Presiona [W] en el menú para empezar el ataque automático.{END}")
+        print(f"  {GREEN}{'─'*50}{END}\n")
+
+        # Restaurar a managed para no dejar en monitor
+        desact = ask("¿Restaurar a modo normal ahora? (s/n) [recomendado]")
+        if desact.lower() != "n":
+            run(f"airmon-ng stop {mon} 2>/dev/null")
+            run(f"ip link set {iface} down 2>/dev/null; "
+                f"iw dev {iface} set type managed 2>/dev/null; "
+                f"ip link set {iface} up 2>/dev/null")
+            run("systemctl start NetworkManager 2>/dev/null")
+            ok("Adaptador restaurado a modo normal.")
+    else:
+        error(f"Modo monitor NO funciona en {mon}.")
+        print(f"\n  {YELLOW}Posibles causas:{END}")
+        print(f"  {DIM}• Driver incorrecto o no compilado para este kernel{END}")
+        print(f"  {DIM}• Adaptador TP-Link TL-WN722N v2/v3: necesita rtl8188eus{END}")
+        print(f"  {DIM}• Intenta: sudo apt install realtek-rtl88xxau-dkms{END}")
+        print(f"  {DIM}• O instala el driver con la opción [2] de este menú{END}")
+
+        if chipset == "Realtek RTL8188EUS":
+            print(f"\n  {WHITE}Para TL-WN722N v2/v3 (RTL8188EUS):{END}")
+            print(f"  {CYAN}sudo apt install realtek-rtl88xxau-dkms{END}")
+            print(f"  {CYAN}sudo rmmod r8188eu; sudo modprobe 8188eu{END}")
+            print(f"  {CYAN}sudo iw dev wlan0 set monitor none{END}")
+
+    pause_back()
+
+
+def list_supported_adapters():
+    """[38] Lista todos los adaptadores soportados con sus drivers."""
+    os.system("clear")
+    banner()
+    separador("ADAPTADORES WiFi SOPORTADOS")
+    print(f"  {DIM}Todos estos adaptadores son compatibles con modo monitor en Kali Linux{END}\n")
+
+    # Agrupar por fabricante
+    groups = {}
+    for uid, (nombre, chipset, driver, repo, apt) in _ADAPTERS_DB.items():
+        fab = nombre.split()[0]
+        if fab not in groups: groups[fab] = []
+        groups[fab].append((uid, nombre, chipset, driver))
+
+    for fab, items in sorted(groups.items()):
+        print(f"  {WHITE}── {fab} {'─'*(40-len(fab))}{END}")
+        for uid, nombre, chipset, driver in items:
+            # Verificar si está conectado ahora
+            lsusb_check = run(f"lsusb | grep -i {uid}", capture=True) or ""
+            connected = f" {GREEN}← CONECTADO{END}" if lsusb_check.strip() else ""
+            print(f"    {CYAN}{uid}{END}  {nombre:<35} {DIM}{chipset}{END}{connected}")
+        print()
+
+    separador()
+    tip("Conecta tu adaptador y usa [37] para instalar el driver automáticamente.")
+    pause_back()
+
+
 OPCIONES = {
     "w":  ("Modo Guiado (principiantes)",              modo_wizard),
     # ── Interfaz ──────────────────────────────────────────────────────────────
@@ -5209,6 +5539,8 @@ OPCIONES = {
     14:   ("Fake AP (beacon flood)",                   fake_ap),
     19:   ("Convertir .cap → hc22000",                 convert_cap),
     20:   ("Chequeo de dependencias",                  check_dependencies),
+    37:   ("Setup Adaptador WiFi (driver + monitor)",  setup_adapter),
+    38:   ("Lista adaptadores soportados",             list_supported_adapters),
     24:   ("OSINT Wordlist Generator",                 osint_wordlist),
     29:   ("Ver historial de capturas",                show_history),
     30:   ("Generar Reporte HTML",                     generate_report),
