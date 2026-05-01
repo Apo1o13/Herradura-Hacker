@@ -108,8 +108,18 @@ dependencias() {
     fi
 
     echo -e "\n${WHITE}─── PYTHON ────────────────────────────────────${END}"
-    info "Instalando módulos Python..."
-    sudo pip3 install colorama -q && ok "colorama"
+    info "Instalando módulos Python via apt (compatible Kali 2024+)..."
+    instalar python3-colorama "colores en terminal (PEP668 safe)"
+    instalar python3-scapy    "manipulación de paquetes de red"
+    instalar python3-pip      "gestor de paquetes Python (opcional)"
+    # Fallback pip con --break-system-packages solo si apt falla
+    if ! python3 -c "import colorama" 2>/dev/null; then
+        warn "colorama no encontrado via apt, intentando pip..."
+        sudo pip3 install colorama --break-system-packages -q 2>/dev/null && ok "colorama (pip)" || \
+        warn "Instala manualmente: sudo apt install python3-colorama"
+    else
+        ok "colorama disponible."
+    fi
 
     echo -e "\n${WHITE}─── WORDLISTS ─────────────────────────────────${END}"
     if apt-cache show wordlists &>/dev/null; then
