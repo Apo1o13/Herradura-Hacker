@@ -1,0 +1,31 @@
+# Herradura Hack — .gitignore
+
+# Archivos de captura y salida
+*.cap
+*.pcap
+*.pcapng
+*.hc22000
+*.csv
+*.db
+*.potfile
+
+# Carpetas de trabajo en tiempo de ejecución
+handshakes/
+scan-output/
+kr00k/
+exploit-engine/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Wordlists (pueden ser muy grandes)
+*.txt.gz
+rockyou.txt
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.swp
