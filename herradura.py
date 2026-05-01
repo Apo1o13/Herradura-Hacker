@@ -237,9 +237,9 @@ def select_interface(monitor_only=False, auto=False):
         tip("Conecte un adaptador WiFi compatible (ej. Alfa AWUS036ACH).")
         return ask("Ingrese el nombre manualmente (ej: wlan0)")
 
-    # Si solo hay una, usarla automáticamente
-    if len(ifaces) == 1 and auto:
-        ok(f"Usando interfaz automáticamente: {ifaces[0]}")
+    # Si solo hay una, seleccionarla automáticamente siempre
+    if len(ifaces) == 1:
+        ok(f"Interfaz detectada automáticamente: {WHITE}{ifaces[0]}{END}")
         return ifaces[0]
 
     separador("INTERFACES DISPONIBLES")
