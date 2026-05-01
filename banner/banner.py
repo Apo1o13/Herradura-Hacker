@@ -20,23 +20,48 @@ END     = '\033[0m'
 os.system("clear")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Centrado dinámico según ancho real del terminal
+# Helpers de layout
 # ─────────────────────────────────────────────────────────────────────────────
+BOX_W  = 62          # ancho visible de la caja (sin bordes)
+INNER  = BOX_W - 2   # ancho interior (sin │ de cada lado)
+
 def _tw():
-    """Ancho del terminal (mínimo 80)."""
     return max(shutil.get_terminal_size((80, 24)).columns, 80)
 
-def _c(text, visual_len=None):
-    """Centra `text` usando `visual_len` como ancho visual (sin ANSI)."""
-    tw = _tw()
-    vl = visual_len if visual_len is not None else len(text)
-    pad = max(0, (tw - vl) // 2)
-    return " " * pad + text
+def _margin():
+    """Espacios a la izquierda para centrar la caja de BOX_W+2 chars."""
+    return " " * max(0, (_tw() - (BOX_W + 2)) // 2)
+
+def _row(content_visible, content_with_color):
+    """
+    Construye una línea de caja:  │ content                    │
+    content_visible : string sin ANSI para medir longitud
+    content_with_color : string con ANSI para imprimir
+    """
+    pad = INNER - len(content_visible)
+    m = _margin()
+    return f"{m}{CYAN}│{END} {content_with_color}{' ' * max(0, pad)}{CYAN}│{END}"
+
+def _sep(char="─", title=""):
+    m = _margin()
+    if title:
+        t = f" {WHITE}{title}{END} "
+        tv = len(f" {title} ")
+        line = char * ((BOX_W - tv) // 2) + f" {WHITE}{title}{END} " + char * ((BOX_W - tv + 1) // 2)
+        return f"{m}{CYAN}├{line}┤{END}"
+    return f"{m}{CYAN}├{'─' * BOX_W}┤{END}"
+
+def _top():
+    m = _margin()
+    return f"{m}{CYAN}┌{'─' * BOX_W}┐{END}"
+
+def _bot():
+    m = _margin()
+    return f"{m}{CYAN}└{'─' * BOX_W}┘{END}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def banner():
-    # Cada línea del logo tiene 22 caracteres braille de ancho visual
     LOGO_W = 22
     tw = _tw()
     pad = " " * max(0, (tw - LOGO_W) // 2)
@@ -57,79 +82,94 @@ def banner():
         "⠸⣿⣿⣿⣿⣿⣿⠟⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣿⣿⠇",
     ]
 
+    tw = _tw()
     print()
     for line in logo_lines:
         print(f"{GREEN}{pad}{line}{END}")
     print()
 
-    # Título centrado
-    title1_vis = len("---< Herradura Hack v5.0 >---")
-    title2_vis = len("---< Creador: Apo1o13 >---")
-    sub_vis    = len("Uso exclusivo para pentesting autorizado")
+    # Título — centrado respecto al ancho del terminal
+    t1v = len("---< Herradura Hack v5.0 >---")
+    t2v = len("---< Creador: Apo1o13 >---")
+    sv  = len("Uso exclusivo para pentesting autorizado")
+    lp1 = " " * max(0, (tw - t1v) // 2)
+    lp2 = " " * max(0, (tw - t2v) // 2)
+    lps = " " * max(0, (tw - sv) // 2)
 
-    print(_c(f"{RED}---< {WHITE}Herradura Hack {GREEN}v5.0 {RED}>---{END}", title1_vis))
-    print(_c(f"{RED}---< {WHITE}Creador: {GREEN}Apo1o13 {RED}>---{END}",    title2_vis))
-    print(_c(f"{DIM}Uso exclusivo para pentesting autorizado{END}",          sub_vis))
+    print(f"{lp1}{RED}---< {WHITE}Herradura Hack {GREEN}v5.0 {RED}>---{END}")
+    print(f"{lp2}{RED}---< {WHITE}Creador: {GREEN}Apo1o13 {RED}>---{END}")
+    print(f"{lps}{DIM}Uso exclusivo para pentesting autorizado{END}")
     print()
 
 
 def menu():
-    tw = _tw()
-    sep = f" {WHITE}{'─' * (tw - 2)}{END}"
+    m = _margin()
 
-    print(_c(f"\033[1;36m╔{'═'*54}╗\033[0m", 56))
-    print(_c(f"\033[1;36m║\033[0m  \033[1;32m[W]\033[0m \033[1;37mMODO GUIADO\033[0m \033[2m← empieza aquí si eres nuevo\033[0m           \033[1;36m║\033[0m", 56))
-    print(_c(f"\033[1;36m╚{'═'*54}╝\033[0m", 56))
-    print()
+    # ── Caja principal ─────────────────────────────────────────────────────────
+    print(_top())
 
-    # ── RECOMENDADOS ─────────────────────────────────────────────────────────
-    print(_c(f"{WHITE}── AUTOMÁTICOS (RECOMENDADOS) ─────────────────────────────{END}", 60))
-    print(_c(f"{RED}[35]{END} {GREEN}Exploit Engine AUTO      {DIM}(exploit + progreso % real){END}   "
-             f"{RED}[36]{END} {GREEN}Exploit Engine MASIVO  {DIM}(varias redes){END}", 90))
-    print(_c(f"{RED}[31]{END} {GREEN}Auto-Pwner               {DIM}(ataque total automático){END}   "
-             f"{RED}[33]{END} {CYAN}Auditoría Express      {DIM}(análisis + exploit){END}", 90))
-    print()
+    # Modo guiado highlight
+    wv = "[W]  MODO GUIADO  \u2190 empieza aqui si eres nuevo"
+    wc = f"{GREEN}[W]{END}  {WHITE}MODO GUIADO{END}  {DIM}\u2190 empieza aqui si eres nuevo{END}"
+    print(_row(wv, wc))
 
-    # ── ATAQUES ───────────────────────────────────────────────────────────────
-    print(_c(f"{WHITE}── ATAQUES WiFi ────────────────────────────────────────────{END}", 62))
-    rows = [
-        (f"{RED}[7]{END}  {GREEN}Handshake WPA/WPA2  {DIM}(deauth){END}",
-         f"{RED}[9]{END}  {YELLOW}PMKID               {DIM}(sin clientes){END}"),
-        (f"{RED}[10]{END} {GREEN}WPS Pixie/PIN       {DIM}(brute){END}",
-         f"{RED}[15]{END} {RED}Evil Twin           {DIM}(AP falso+portal){END}"),
-        (f"{RED}[21]{END} {RED}KARMA/MANA          {DIM}(auto-conectar devs){END}",
-         f"{RED}[23]{END} {MAGENTA}WPA Enterprise      {DIM}(corp/uni){END}"),
-        (f"{RED}[17]{END} {YELLOW}Auto-Crack          {DIM}(captura+crack auto){END}",
-         f"{RED}[25]{END} {GREEN}WEP Full Attack     {DIM}(ARP replay){END}"),
-        (f"{RED}[13]{END} {GREEN}Deautenticación     {DIM}(desconectar){END}",
-         f"{RED}[27]{END} {YELLOW}Hidden SSID         {DIM}(redes ocultas){END}"),
+    print(_sep(title="AUTOMATICOS  RECOMENDADOS"))
+
+    lines_auto = [
+        ("[35] Exploit Engine AUTO   auto-exploit + progreso %",
+         f"{RED}[35]{END} {GREEN}Exploit Engine AUTO  {END} {DIM}auto-exploit + progreso %{END}"),
+        ("[36] Exploit Engine MASIVO varias redes en secuencia",
+         f"{RED}[36]{END} {GREEN}Exploit Engine MASIVO{END} {DIM}varias redes en secuencia{END}"),
+        ("[33] Auditoria Express     escanea -> analiza -> ataca",
+         f"{RED}[33]{END} {CYAN}Auditoria Express    {END} {DIM}escanea -> analiza -> ataca{END}"),
+        ("[31] Auto-Pwner            ataque total automatico",
+         f"{RED}[31]{END} {CYAN}Auto-Pwner           {END} {DIM}ataque total automatico{END}"),
     ]
-    for left, right in rows:
-        print(_c(f"{left}   {right}", 90))
-    print()
+    for vis, col in lines_auto:
+        print(_row(vis, col))
 
-    # ── AVANZADO ──────────────────────────────────────────────────────────────
-    print(_c(f"{WHITE}── AVANZADO & CVEs ─────────────────────────────────────────{END}", 62))
-    print(_c(f"{RED}[32]{END} {RED}Vulns Modernas 2025  {DIM}(Dragonblood/KRACK){END}   "
-             f"{RED}[34]{END} {MAGENTA}Suite CVE 2019-2024  {DIM}(Kr00k/Frag/EAP){END}", 90))
-    print(_c(f"{RED}[28]{END} {RED}Post-Explotación     {DIM}(scan vuln+LAN){END}   "
-             f"{RED}[26]{END} {GREEN}Deauth Hopping       {DIM}(todos canales){END}", 90))
-    print()
+    print(_sep(title="ATAQUES WiFi"))
 
-    # ── HERRAMIENTAS ──────────────────────────────────────────────────────────
-    print(_c(f"{WHITE}── HERRAMIENTAS ────────────────────────────────────────────{END}", 62))
-    print(_c(
-        f"{RED}[1]{END} {GREEN}Monitor ON{END}  "
-        f"{RED}[2]{END} {GREEN}Monitor OFF{END}  "
-        f"{RED}[5]{END} {GREEN}Escanear{END}  "
-        f"{RED}[6]{END} {GREEN}Scan Vivo{END}  "
-        f"{RED}[12]{END} {GREEN}MAC Spoof{END}", 80))
-    print(_c(
-        f"{RED}[20]{END} {CYAN}Dependencias{END}  "
-        f"{RED}[24]{END} {CYAN}OSINT Wordlist{END}  "
-        f"{RED}[29]{END} {CYAN}Historial{END}  "
-        f"{RED}[30]{END} {CYAN}Reporte HTML{END}  "
-        f"{RED}[0]{END} {RED}Salir{END}", 80))
+    lines_atk = [
+        ("[7]  Handshake WPA/WPA2   [9]  PMKID (sin clientes)",
+         f"{RED}[7]{END}  {GREEN}Handshake WPA/WPA2   {END}{RED}[9]{END}  {YELLOW}PMKID (sin clientes){END}"),
+        ("[10] WPS Pixie/PIN        [15] Evil Twin + Portal",
+         f"{RED}[10]{END} {GREEN}WPS Pixie/PIN        {END}{RED}[15]{END} {RED}Evil Twin + Portal{END}"),
+        ("[21] KARMA/MANA           [23] WPA Enterprise",
+         f"{RED}[21]{END} {RED}KARMA/MANA           {END}{RED}[23]{END} {MAGENTA}WPA Enterprise{END}"),
+        ("[17] Auto-Crack           [25] WEP Full Attack",
+         f"{RED}[17]{END} {YELLOW}Auto-Crack           {END}{RED}[25]{END} {GREEN}WEP Full Attack{END}"),
+        ("[13] Deautenticacion      [27] Hidden SSID Revealer",
+         f"{RED}[13]{END} {GREEN}Deautenticacion      {END}{RED}[27]{END} {YELLOW}Hidden SSID Revealer{END}"),
+    ]
+    for vis, col in lines_atk:
+        print(_row(vis, col))
+
+    print(_sep(title="AVANZADO   CVEs"))
+
+    lines_adv = [
+        ("[32] Vulns Modernas 2025  [34] Suite CVE 2019-2024",
+         f"{RED}[32]{END} {RED}Vulns Modernas 2025  {END}{RED}[34]{END} {MAGENTA}Suite CVE 2019-2024{END}"),
+        ("[28] Post-Explotacion     [26] Deauth Hopping",
+         f"{RED}[28]{END} {RED}Post-Explotacion     {END}{RED}[26]{END} {GREEN}Deauth Hopping{END}"),
+    ]
+    for vis, col in lines_adv:
+        print(_row(vis, col))
+
+    print(_sep(title="HERRAMIENTAS"))
+
+    lines_tools = [
+        ("[1] Monitor ON   [2] Monitor OFF   [5] Escanear",
+         f"{RED}[1]{END} {GREEN}Monitor ON   {END}{RED}[2]{END} {GREEN}Monitor OFF   {END}{RED}[5]{END} {GREEN}Escanear{END}"),
+        ("[12] MAC Spoof   [20] Dependencias  [6] Scan Vivo",
+         f"{RED}[12]{END} {GREEN}MAC Spoof   {END}{RED}[20]{END} {CYAN}Dependencias  {END}{RED}[6]{END} {GREEN}Scan Vivo{END}"),
+        ("[29] Historial   [30] Reporte HTML   [0] Salir",
+         f"{RED}[29]{END} {CYAN}Historial   {END}{RED}[30]{END} {CYAN}Reporte HTML   {END}{RED}[0]{END} {RED}Salir{END}"),
+    ]
+    for vis, col in lines_tools:
+        print(_row(vis, col))
+
+    print(_bot())
     print()
 
 
@@ -141,7 +181,7 @@ def goodbye():
   | |  __| |  | | |  | | |  | | |_) \\ \x5c_/ /| |__  | |
   | | |_ | |  | | |  | | |  | |  _ < \\   / |  __| | |
   | |__| | |__| | |__| | |__| | |_) | | |  | |____|_|
-   \\_____|\x5c____/ \\____/|_____/|____/  |_|  |______(_)\x1b[0m
+   \x5c_____|\x5c____/ \x5c____/|_____/|____/  |_|  |______(_)\x1b[0m
 
      {RED}<{WHITE}El poder del usuario radica en su ANONIMATO{RED}>{END}
 

