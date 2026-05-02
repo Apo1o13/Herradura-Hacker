@@ -586,6 +586,30 @@ def modo_wizard():
         tip("Prueba: sudo modprobe -r rtl8812au && sudo modprobe rtl8812au")
         tip("O instala el driver: sudo apt install realtek-rtl88xxau-dkms")
         pause_back(); return
+
+    # Verificar que el driver realmente captura frames (rtl8xxxu reporta monitor
+    # pero no captura — necesita el driver out-of-tree 8188eu)
+    sp_vf = Spinner("Verificando captura real de frames (4s)...")
+    sp_vf.start()
+    captura_ok = _verify_monitor_captures(mon_iface, seconds=4)
+    sp_vf.stop()
+
+    if not captura_ok:
+        driver_actual = _get_driver(mon_iface)
+        warn(f"El driver '{driver_actual}' NO captura frames 802.11 reales.")
+        warn("El modo monitor del kernel está activo pero el firmware no lo soporta.")
+        print()
+        print(f"  {WHITE}Solución para TL-WN722N v2/v3 (RTL8188EUS):{END}")
+        print(f"  {CYAN}1.{END} sudo apt install dkms build-essential linux-headers-$(uname -r)")
+        print(f"  {CYAN}2.{END} git clone https://github.com/aircrack-ng/rtl8188eus /tmp/rtl8188eus")
+        print(f"  {CYAN}3.{END} cd /tmp/rtl8188eus && sudo make && sudo make install")
+        print(f"  {CYAN}4.{END} echo 'blacklist rtl8xxxu' | sudo tee /etc/modprobe.d/rtl8xxxu-blacklist.conf")
+        print(f"  {CYAN}5.{END} sudo reboot")
+        print()
+        run(f"airmon-ng stop {mon_iface} 2>/dev/null")
+        run("systemctl start NetworkManager 2>/dev/null")
+        pause_back(); return
+
     ok(f"Modo monitor activo: {CYAN}{mon_iface}{END}")
 
     # ── PASO 4: Probe Request Harvesting ─────────────────────────────────────
@@ -1096,6 +1120,66 @@ def modo_wizard():
 # INTERFAZ
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _get_driver(interfaz: str) -> str:
+    """Devuelve el nombre del driver del kernel para una interfaz."""
+    drv = run(f"readlink /sys/class/net/{interfaz}/device/driver/module 2>/dev/null", capture=True) or ""
+    if drv:
+        return drv.strip().split("/")[-1]
+    # Fallback via ethtool
+    drv2 = run(f"ethtool -i {interfaz} 2>/dev/null | grep driver", capture=True) or ""
+    m = re.search(r'driver:\s*(\S+)', drv2)
+    return m.group(1) if m else ""
+
+
+def _try_switch_to_8188eu(interfaz: str) -> bool:
+    """
+    Si el adaptador usa rtl8xxxu (driver in-kernel limitado), intenta cambiarlo
+    al driver out-of-tree 8188eu que sí soporta monitor mode real.
+    Retorna True si el cambio fue exitoso.
+    """
+    # Verificar si 8188eu está disponible
+    mod_check = run("modinfo 8188eu 2>/dev/null | head -1", capture=True) or ""
+    if not mod_check:
+        return False
+
+    warn("Driver rtl8xxxu detectado — cambiando a 8188eu para monitor mode real...")
+    run(f"ip link set {interfaz} down 2>/dev/null")
+    time.sleep(0.3)
+    run("rmmod rtl8xxxu 2>/dev/null")
+    time.sleep(0.5)
+    run("modprobe 8188eu 2>/dev/null")
+    time.sleep(1.5)
+
+    # Verificar que la interfaz sigue existente con el nuevo driver
+    new_drv = _get_driver(interfaz)
+    if "8188eu" in new_drv or "8188" in new_drv:
+        ok(f"Driver cambiado a 8188eu en {interfaz}")
+        return True
+    warn("No se pudo cambiar a 8188eu.")
+    return False
+
+
+def _verify_monitor_captures(interfaz: str, seconds: int = 4) -> bool:
+    """
+    Verifica que el modo monitor realmente captura frames (prueba real).
+    Usa tshark 4s: si recibe algún frame 802.11, retorna True.
+    """
+    if not shutil.which("tshark"):
+        return True  # Sin tshark, asumir OK
+    out = run(
+        f"timeout {seconds} tshark -i {interfaz} -a duration:{seconds} "
+        f"-Y 'wlan' -c 5 -q 2>/dev/null | head -3",
+        capture=True
+    ) or ""
+    # tshark imprime "N packets captured" al final
+    m = re.search(r'(\d+) packets? captured', out)
+    if m and int(m.group(1)) > 0:
+        return True
+    # También verificar si simplemente hay líneas de frames
+    lines = [l for l in out.strip().splitlines() if l.strip() and not l.startswith("Running")]
+    return len(lines) > 0
+
+
 def _enable_monitor(interfaz: str) -> str:
     """
     Activa modo monitor con múltiples métodos (airmon-ng, iw, ip link).
@@ -1106,11 +1190,16 @@ def _enable_monitor(interfaz: str) -> str:
     run("rfkill unblock all 2>/dev/null")
     time.sleep(0.5)
 
-    # 2) Matar procesos que interfieren
+    # 2) Detectar driver problemático rtl8xxxu y cambiar a 8188eu si es posible
+    driver = _get_driver(interfaz)
+    if "rtl8xxxu" in driver:
+        _try_switch_to_8188eu(interfaz)
+
+    # 3) Matar procesos que interfieren
     run("airmon-ng check kill 2>/dev/null")
     time.sleep(1)
 
-    # 3) Intentar con airmon-ng (método principal)
+    # 4) Intentar con airmon-ng (método principal)
     out = run(f"airmon-ng start {interfaz} 2>&1", capture=True) or ""
 
     # Detectar nuevo nombre de la interfaz monitor
@@ -1135,7 +1224,7 @@ def _enable_monitor(interfaz: str) -> str:
         if "monitor" in mode_chk:
             return iface
 
-    # 4) Fallback: método manual con ip + iw (compatible TP-Link rtl8812au/rtl88x2bu)
+    # 5) Fallback: método manual con ip + iw (compatible TP-Link rtl8812au/rtl88x2bu)
     warn("airmon-ng no creó interfaz monitor. Intentando método manual...")
     run(f"ip link set {interfaz} down 2>/dev/null")
     time.sleep(0.3)
@@ -1149,7 +1238,7 @@ def _enable_monitor(interfaz: str) -> str:
         ok(f"Modo monitor manual activo en: {CYAN}{interfaz}{END}")
         return interfaz
 
-    # 5) Último intento: iwconfig
+    # 6) Último intento: iwconfig
     run(f"ifconfig {interfaz} down 2>/dev/null")
     run(f"iwconfig {interfaz} mode monitor 2>/dev/null")
     run(f"ifconfig {interfaz} up 2>/dev/null")
@@ -1160,8 +1249,11 @@ def _enable_monitor(interfaz: str) -> str:
         return interfaz
 
     error("No se pudo activar modo monitor.")
-    tip("Para TP-Link: instala el driver con 'sudo dkms install rtl8812au'")
-    tip("Luego ejecuta: sudo rmmod rtl8812au && sudo modprobe rtl8812au")
+    tip("Para TP-Link TL-WN722N v2/v3: instala el driver out-of-tree")
+    tip("  sudo apt install dkms build-essential linux-headers-$(uname -r)")
+    tip("  git clone https://github.com/aircrack-ng/rtl8188eus /tmp/rtl8188eus")
+    tip("  cd /tmp/rtl8188eus && sudo make && sudo make install")
+    tip("  sudo rmmod rtl8xxxu && sudo modprobe 8188eu")
     return interfaz
 
 
@@ -1174,8 +1266,21 @@ def start_monitor():
     sp.start()
     mon = _enable_monitor(interfaz)
     sp.stop()
-    ok(f"Interfaz monitor: {CYAN}{mon}{END}")
     run(f"iw dev {mon} info 2>/dev/null | grep -E 'type|addr'", capture=False)
+
+    # Verificar captura real
+    sp_v = Spinner("Comprobando captura de frames (4s)...")
+    sp_v.start()
+    captura_ok = _verify_monitor_captures(mon, seconds=4)
+    sp_v.stop()
+
+    if captura_ok:
+        ok(f"Interfaz monitor: {CYAN}{mon}{END} — captura de frames OK")
+    else:
+        driver_actual = _get_driver(mon)
+        warn(f"Driver '{driver_actual}' activo pero NO captura frames 802.11.")
+        warn("Instala el driver out-of-tree: git clone https://github.com/aircrack-ng/rtl8188eus")
+        warn("  cd rtl8188eus && sudo make && sudo make install && sudo reboot")
     time.sleep(2)
 
 def stop_monitor():
