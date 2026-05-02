@@ -1157,28 +1157,53 @@ def modo_wizard():
             # Conectar automáticamente desde Kali con nmcli
             separador("CONECTANDO A LA RED OBJETIVO")
             _essid_open = (clave in ("SIN CONTRASEÑA", "", None))
-            if _essid_open:
-                info(f"Red abierta — conectando a '{essid}' desde Kali...")
-                _conn_out = run(
-                    f"nmcli dev wifi connect '{essid}' ifname {interfaz} 2>&1",
-                    capture=True
-                ) or ""
-            else:
-                info(f"Conectando a '{essid}' con clave obtenida desde Kali...")
-                _conn_out = run(
-                    f"nmcli dev wifi connect '{essid}' password '{clave}' ifname {interfaz} 2>&1",
-                    capture=True
-                ) or ""
 
-            time.sleep(4)
-            # Verificar si la conexión fue exitosa
-            _ip_check = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
-            if _ip_check.strip():
-                _ip_obtenida = _ip_check.strip().split()[1].split("/")[0]
-                ok(f"Conectado a '{essid}' — IP obtenida: {GREEN}{_ip_obtenida}{END}")
-            else:
-                warn(f"No se obtuvo IP automáticamente. Salida nmcli: {_conn_out[:100]}")
-                warn(f"Intentando con dhclient...")
+            # Esperar que NetworkManager escanee y encuentre la red
+            info(f"Escaneando redes disponibles...")
+            run(f"nmcli dev wifi rescan ifname {interfaz} 2>/dev/null", capture=True)
+            time.sleep(6)  # Dar tiempo al scan
+
+            # Intentar conectar por BSSID (más fiable que SSID con caracteres especiales)
+            _conn_ok = False
+            for _attempt in range(3):
+                if _essid_open:
+                    info(f"Conectando a '{essid}' (intento {_attempt+1}/3) por BSSID {bssid}...")
+                    _conn_out = run(
+                        f"nmcli dev wifi connect '{bssid}' ifname {interfaz} 2>&1",
+                        capture=True
+                    ) or ""
+                    # Fallback por SSID si BSSID falla
+                    if "error" in _conn_out.lower() or "no se encontró" in _conn_out.lower():
+                        _conn_out = run(
+                            f"nmcli dev wifi connect \"{essid}\" ifname {interfaz} 2>&1",
+                            capture=True
+                        ) or ""
+                else:
+                    info(f"Conectando a '{essid}' con clave (intento {_attempt+1}/3)...")
+                    _conn_out = run(
+                        f"nmcli dev wifi connect '{bssid}' password \"{clave}\" ifname {interfaz} 2>&1",
+                        capture=True
+                    ) or ""
+                    if "error" in _conn_out.lower() or "no se encontró" in _conn_out.lower():
+                        _conn_out = run(
+                            f"nmcli dev wifi connect \"{essid}\" password \"{clave}\" ifname {interfaz} 2>&1",
+                            capture=True
+                        ) or ""
+
+                time.sleep(5)
+                _ip_check = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
+                if _ip_check.strip():
+                    _ip_obtenida = _ip_check.strip().split()[1].split("/")[0]
+                    ok(f"Conectado a '{essid}' — IP: {GREEN}{_ip_obtenida}{END}")
+                    _conn_ok = True
+                    break
+                # Rescan para el siguiente intento
+                run(f"nmcli dev wifi rescan ifname {interfaz} 2>/dev/null", capture=True)
+                time.sleep(3)
+
+            if not _conn_ok:
+                warn(f"No se pudo conectar automáticamente. Último error: {_conn_out[:120]}")
+                warn(f"Intentando dhclient como último recurso...")
                 run(f"dhclient {interfaz} 2>/dev/null")
                 time.sleep(3)
                 _ip_check2 = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
@@ -1186,7 +1211,7 @@ def modo_wizard():
                     _ip_obtenida = _ip_check2.strip().split()[1].split("/")[0]
                     ok(f"Conectado — IP: {GREEN}{_ip_obtenida}{END}")
                 else:
-                    warn(f"Sin IP. Continuando de todas formas con post-explotación...")
+                    warn(f"Sin IP. Continuando post-explotación sin conexión confirmada...")
 
             post_explotacion()
             return   # post_explotacion ya tiene pause_back al final
