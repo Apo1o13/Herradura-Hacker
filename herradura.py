@@ -3690,37 +3690,70 @@ def post_explotacion():
     separador("DISPOSITIVOS EN LA RED")
     devices = []
 
+    seen_ips = set()
+
+    def _add_device(ip, mac="??:??:??:??:??:??", vendor=""):
+        if ip and ip not in seen_ips:
+            seen_ips.add(ip)
+            devices.append({"ip": ip, "mac": mac, "vendor": vendor})
+
+    # Método 1: tabla ARP del sistema (instantáneo, no requiere herramientas extra)
+    neigh_out = run("ip neigh show 2>/dev/null", capture=True) or ""
+    for line in neigh_out.splitlines():
+        nm = re.match(r'([\d.]+)\s+dev\s+\S+\s+lladdr\s+([0-9a-f:]+)', line, re.I)
+        if nm:
+            _add_device(nm.group(1), nm.group(2))
+
+    # Método 2: arp-scan con reintentos
     if check_tool("arp-scan"):
         sp2 = Spinner("Escaneando dispositivos con arp-scan...")
         sp2.start()
-        arp_out = run(f"arp-scan --interface={iface_lan} {network} 2>/dev/null", capture=True) or ""
+        arp_out = run(f"arp-scan --interface={iface_lan} --retry=3 {network} 2>/dev/null", capture=True) or ""
         sp2.stop()
         for line in arp_out.splitlines():
             m = re.match(r'([\d.]+)\s+([0-9a-f:]+)\s*(.*)', line, re.IGNORECASE)
             if m:
-                devices.append({"ip": m.group(1), "mac": m.group(2), "vendor": m.group(3).strip()})
-    elif check_tool("nmap"):
+                _add_device(m.group(1), m.group(2), m.group(3).strip())
+
+    # Método 3: nmap ping sweep
+    if check_tool("nmap") and len(devices) < 2:
         sp2 = Spinner("Escaneando con nmap -sn...")
         sp2.start()
-        nmap_out = run(f"nmap -sn {network} 2>/dev/null", capture=True) or ""
+        nmap_out = run(f"nmap -sn --send-ip {network} 2>/dev/null", capture=True) or ""
         sp2.stop()
         current_ip = None
         for line in nmap_out.splitlines():
-            ip_m = re.search(r'Nmap scan report for [\w.]+ \(([\d.]+)\)|Nmap scan report for ([\d.]+)', line)
+            ip_m = re.search(r'Nmap scan report for [\w.-]+ \(([\d.]+)\)|Nmap scan report for ([\d.]+)', line)
             if ip_m:
                 current_ip = ip_m.group(1) or ip_m.group(2)
             mac_m = re.search(r'MAC Address: ([0-9A-F:]+)\s*(.*)', line)
             if mac_m and current_ip:
-                devices.append({"ip": current_ip, "mac": mac_m.group(1), "vendor": mac_m.group(2).strip("()")})
+                _add_device(current_ip, mac_m.group(1), mac_m.group(2).strip("()"))
                 current_ip = None
-    else:
-        warn("arp-scan y nmap no instalados.")
-        info("Instale: sudo apt install arp-scan nmap")
-        pause_back()
-        return
+            elif current_ip and "Host is up" in line:
+                _add_device(current_ip)
+
+    # Método 4: ping sweep manual (último recurso)
+    if len(devices) < 2 and network:
+        sp2 = Spinner("Ping sweep manual...")
+        sp2.start()
+        run(f"nmap -sn -PE --send-ip {network} -oG /tmp/_ping_sweep.txt 2>/dev/null", capture=True)
+        sp2.stop()
+        if os.path.exists("/tmp/_ping_sweep.txt"):
+            sweep_out = open("/tmp/_ping_sweep.txt").read()
+            for ln in sweep_out.splitlines():
+                pm = re.search(r'Host: ([\d.]+)', ln)
+                if pm and "Up" in ln:
+                    _add_device(pm.group(1))
+
+    # Asegurar que el gateway siempre aparezca
+    if gateway and gateway not in seen_ips:
+        _add_device(gateway, vendor="Gateway")
 
     if not devices:
-        warn("No se detectaron dispositivos. ¿Está realmente conectado?")
+        warn("No se detectaron dispositivos.")
+        tip(f"Verifica con: ip neigh show")
+        tip(f"O ejecuta manualmente: sudo arp-scan --interface={iface_lan} {network}")
         pause_back()
         return
 
