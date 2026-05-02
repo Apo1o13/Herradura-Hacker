@@ -658,17 +658,28 @@ def modo_wizard():
     print()
 
     # ── PASO 6: Resultado ─────────────────────────────────────────────────────
-    separador("RESULTADO")
+    os.system("clear")
     if clave:
-        ok(f"CLAVE ENCONTRADA: {GREEN}{clave}{END}")
-        ok(f"Metodo:           {WHITE}{metodo}{END}")
+        print(f"""
+{GREEN}╔{'═'*54}╗
+║{'★  CLAVE ENCONTRADA  ★':^54}║
+╠{'═'*54}╣
+║  Red    : {CYAN}{essid[:40]:<40}{GREEN}  ║
+║  BSSID  : {WHITE}{bssid:<40}{GREEN}  ║
+║  Clave  : {WHITE}{clave[:40]:<40}{GREEN}  ║
+║  Método : {DIM}{metodo[:40]:<40}{GREEN}  ║
+╚{'═'*54}╝{END}
+""")
         aid = db_log_attack("Wizard Auto", essid, bssid, channel, f"crackeada:{clave}")
         db_log_password(aid, essid, bssid, clave, metodo)
-        print(f"\n  {WHITE}Guardado en historial. Usa [29] para verlo o [30] para reporte HTML.{END}")
+        ok("Guardado en historial — usa [29] Ver historial o [30] Reporte HTML.")
     else:
+        separador("RESULTADO")
         warn("No se encontró la clave con los vectores disponibles.")
         tip("La red puede tener contraseña robusta. Prueba con un diccionario mayor.")
-        tip("Wordlists en: /usr/share/wordlists/ o https://github.com/danielmiessler/SecLists")
+        tip("Wordlists: /usr/share/wordlists/ o github.com/danielmiessler/SecLists")
+
+    input(f"\n  {DIM}Presiona Enter para continuar...{END}")
 
     # ── PASO 7: Restaurar red ─────────────────────────────────────────────────
     step(6, "Restaurando conexión de red")
