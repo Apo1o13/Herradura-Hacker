@@ -1013,10 +1013,11 @@ def modo_wizard():
         eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
         clave, metodo = smart_exploit_target(eng)
 
-        # ── Detener Evil Twin ──────────────────────────────────────────────
+        # ── Detener Engine y Evil Twin ─────────────────────────────────────
+        if not eng._stop.is_set():
+            eng.done(clave, metodo)   # para el display thread limpiamente
         _twin_stop.set()
-        _thr.Thread(daemon=True, target=lambda: None).join  # flush
-        time.sleep(2)
+        time.sleep(1)
 
         if not clave and _twin_result["clave"]:
             clave  = _twin_result["clave"]
@@ -1068,13 +1069,19 @@ def modo_wizard():
                     info("Kr00k: AP no vulnerable o sin datos en buffer.")
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Detener KARMA background
+    # Detener KARMA y limpiar procesos en background
     # ─────────────────────────────────────────────────────────────────────────
     _karma_stop.set()
     for _kp in _karma_procs:
         try: _kp.terminate()
         except Exception: pass
-
+    # Matar procesos que puedan seguir escribiendo en pantalla
+    run("pkill -f 'hashcat' 2>/dev/null; pkill -f 'aircrack-ng' 2>/dev/null; "
+        "pkill -f 'hcxdumptool' 2>/dev/null; pkill -f 'reaver' 2>/dev/null", capture=True)
+    time.sleep(0.5)
+    # Limpiar líneas residuales del engine en pantalla
+    sys.stdout.write("\033[3A" + ("\n" + " " * 100) * 3 + "\r")
+    sys.stdout.flush()
     print()
 
     # ── RESULTADO ─────────────────────────────────────────────────────────────
