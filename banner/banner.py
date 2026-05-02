@@ -23,7 +23,7 @@ os.system("clear")
 # Helpers de layout
 # ─────────────────────────────────────────────────────────────────────────────
 BOX_W  = 62          # ancho visible de la caja (sin bordes)
-INNER  = BOX_W - 2   # ancho interior (sin │ de cada lado)
+INNER  = BOX_W - 1   # ancho interior: │+sp+INNER+│ = 1+1+61+1 = 64 = BOX_W+2 ✓
 
 def _tw():
     return max(shutil.get_terminal_size((80, 24)).columns, 80)
@@ -108,8 +108,8 @@ def menu():
     # Formato: │[sp][L_28chars][│][sp][R_28chars][sp]│
     #          1 + 1 + 28 + 1 + 1 + 28 + 1 = 61  → falta 1
     # Usamos: │[sp][L_28][│][sp][R_29]│  = 1+1+28+1+1+29+1 = 62  ✓
-    L_W = 28   # ancho columna izquierda (visible, sin el espacio inicial)
-    R_W = 29   # ancho columna derecha   (visible, sin el espacio inicial)
+    L_W = 29   # │+sp+29+│+sp+30+│ = 64 = BOX_W+2 ✓
+    R_W = 30
 
     def _r2(nL, nameL, colL, nR, nameR, colR):
         """
