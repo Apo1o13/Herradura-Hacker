@@ -270,8 +270,9 @@ def quick_scan(interfaz, segundos=15):
     sp.start()
     try:
         subprocess.run(
-            f"timeout {segundos} airodump-ng --write {out_base} --output-format csv {interfaz}",
-            shell=True, capture_output=True
+            f"timeout --kill-after=5 {segundos} airodump-ng --write {out_base} --output-format csv {interfaz}",
+            shell=True, capture_output=True,
+            timeout=segundos + 10
         )
     except Exception:
         pass
