@@ -1040,28 +1040,46 @@ def modo_wizard():
     print()
 
     # ── RESULTADO ─────────────────────────────────────────────────────────────
-    os.system("clear")
+    print("\n" * 3)
     if clave:
+        # Beep de alerta
+        print('\a', end='', flush=True)
+        time.sleep(0.3)
+        print('\a', end='', flush=True)
         print(f"""
-{GREEN}╔{'═'*58}╗
-║{'★  CLAVE ENCONTRADA  ★':^58}║
-╠{'═'*58}╣
-║  Red    : {CYAN}{essid[:44]:<44}{GREEN}  ║
-║  BSSID  : {WHITE}{bssid:<44}{GREEN}  ║
-║  Clave  : {WHITE}{clave[:44]:<44}{GREEN}  ║
-║  Método : {DIM}{metodo[:44]:<44}{GREEN}  ║
-╚{'═'*58}╝{END}
+{GREEN}╔{'═'*60}╗
+║{'':^60}║
+║{'★★★  CLAVE ENCONTRADA  ★★★':^60}║
+║{'':^60}║
+╠{'═'*60}╣
+║  Red    : {CYAN}{essid[:54]:<54}{GREEN}  ║
+║  BSSID  : {WHITE}{bssid:<54}{GREEN}  ║
+║  Clave  : {WHITE}{clave[:54]:<54}{GREEN}  ║
+║  Método : {DIM}{metodo[:54]:<54}{GREEN}  ║
+║{'':^60}║
+╚{'═'*60}╝{END}
 """)
         aid = db_log_attack("Wizard Completo", essid, bssid, channel, f"crackeada:{clave}")
         db_log_password(aid, essid, bssid, clave, metodo)
         ok("Guardado en historial — usa [29] Ver historial o [30] Reporte HTML.")
     else:
-        separador("RESULTADO")
-        warn("No se encontró la clave con ninguno de los vectores disponibles.")
-        tip("La red tiene contraseña robusta o protecciones activas.")
-        tip("Prueba con un diccionario más grande: github.com/danielmiessler/SecLists")
+        print(f"""
+{RED}╔{'═'*60}╗
+║{'':^60}║
+║{'✗  SIN RESULTADO — NO SE ENCONTRÓ LA CLAVE  ✗':^60}║
+║{'':^60}║
+╠{'═'*60}╣
+║  Red    : {WHITE}{essid[:54]:<54}{RED}  ║
+║  BSSID  : {WHITE}{bssid:<54}{RED}  ║
+╠{'═'*60}╣
+║  {YELLOW}{'Vectores probados: WPS Pixie, WPS PIN, PMKID, Handshake'[:58]:<58}{RED}  ║
+║  {DIM}{'La red tiene contraseña robusta o WPS desactivado.'[:58]:<58}{RED}  ║
+║  {DIM}{'Prueba con un diccionario mayor: SecLists / github.com'[:58]:<58}{RED}  ║
+║{'':^60}║
+╚{'═'*60}╝{END}
+""")
 
-    input(f"\n  {DIM}Presiona Enter para continuar...{END}")
+    input(f"\n  {WHITE}[ Presiona Enter para continuar... ]{END}\n")
 
     # ── POST-EXPLOTACIÓN (si se obtuvo la clave) ──────────────────────────────
     if clave and metodo not in ("Kr00k CVE-2019-15126",):
