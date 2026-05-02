@@ -201,13 +201,23 @@ def progress_bar(segundos, msg="Capturando"):
 # Helpers de sistema
 # ─────────────────────────────────────────────────────────────────────────────
 def run(cmd, capture=False):
+    import re as _re
+    # Si el comando usa "timeout N airodump-ng", forzar kill-after para evitar cuelgues
+    cmd = _re.sub(
+        r'\btimeout\s+(\d+)\s+(airodump-ng)',
+        r'timeout --kill-after=5 \1 \2',
+        cmd
+    )
     try:
         if capture:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            # Extraer segundos del timeout para poner safety net en subprocess
+            m = _re.search(r'timeout\s+(?:--kill-after=\d+\s+)?(\d+)', cmd)
+            py_timeout = int(m.group(1)) + 15 if m else None
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=py_timeout)
             return r.stdout + r.stderr
         else:
             subprocess.run(cmd, shell=True)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, subprocess.TimeoutExpired):
         pass
 
 def check_tool(tool):
