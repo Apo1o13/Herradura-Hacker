@@ -1158,60 +1158,69 @@ def modo_wizard():
             separador("CONECTANDO A LA RED OBJETIVO")
             _essid_open = (clave in ("SIN CONTRASEÑA", "", None))
 
-            # Esperar que NetworkManager escanee y encuentre la red
-            info(f"Escaneando redes disponibles...")
+            # Re-entregar la interfaz a NetworkManager (airmon-ng la saca de NM)
+            info(f"Reiniciando gestión de interfaz por NetworkManager...")
+            run(f"nmcli device set {interfaz} managed yes 2>/dev/null", capture=True)
+            run(f"nmcli device set {interfaz} autoconnect yes 2>/dev/null", capture=True)
+            time.sleep(2)
             run(f"nmcli dev wifi rescan ifname {interfaz} 2>/dev/null", capture=True)
-            time.sleep(6)  # Dar tiempo al scan
+            time.sleep(8)  # Dar tiempo al scan completo
 
-            # Intentar conectar por BSSID (más fiable que SSID con caracteres especiales)
             _conn_ok = False
+            _conn_out = ""
+
+            # Método 1: nmcli con SSID + bssid keyword (sintaxis correcta)
             for _attempt in range(3):
+                info(f"Conectando a '{essid}' (intento {_attempt+1}/3)...")
                 if _essid_open:
-                    info(f"Conectando a '{essid}' (intento {_attempt+1}/3) por BSSID {bssid}...")
                     _conn_out = run(
-                        f"nmcli dev wifi connect '{bssid}' ifname {interfaz} 2>&1",
+                        f'nmcli dev wifi connect "{essid}" bssid {bssid} ifname {interfaz} 2>&1',
                         capture=True
                     ) or ""
-                    # Fallback por SSID si BSSID falla
-                    if "error" in _conn_out.lower() or "no se encontró" in _conn_out.lower():
+                    if "error" in _conn_out.lower():
+                        # Fallback sin especificar BSSID
                         _conn_out = run(
-                            f"nmcli dev wifi connect \"{essid}\" ifname {interfaz} 2>&1",
+                            f'nmcli dev wifi connect "{essid}" ifname {interfaz} 2>&1',
                             capture=True
                         ) or ""
                 else:
-                    info(f"Conectando a '{essid}' con clave (intento {_attempt+1}/3)...")
                     _conn_out = run(
-                        f"nmcli dev wifi connect '{bssid}' password \"{clave}\" ifname {interfaz} 2>&1",
+                        f'nmcli dev wifi connect "{essid}" bssid {bssid} '
+                        f'password "{clave}" ifname {interfaz} 2>&1',
                         capture=True
                     ) or ""
-                    if "error" in _conn_out.lower() or "no se encontró" in _conn_out.lower():
+                    if "error" in _conn_out.lower():
                         _conn_out = run(
-                            f"nmcli dev wifi connect \"{essid}\" password \"{clave}\" ifname {interfaz} 2>&1",
+                            f'nmcli dev wifi connect "{essid}" password "{clave}" ifname {interfaz} 2>&1',
                             capture=True
                         ) or ""
 
-                time.sleep(5)
+                time.sleep(6)
                 _ip_check = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
                 if _ip_check.strip():
                     _ip_obtenida = _ip_check.strip().split()[1].split("/")[0]
                     ok(f"Conectado a '{essid}' — IP: {GREEN}{_ip_obtenida}{END}")
                     _conn_ok = True
                     break
-                # Rescan para el siguiente intento
                 run(f"nmcli dev wifi rescan ifname {interfaz} 2>/dev/null", capture=True)
+                time.sleep(4)
+
+            # Método 2: iwconfig + dhclient (bypasa NetworkManager, funciona en redes abiertas)
+            if not _conn_ok and _essid_open:
+                info(f"Intentando conexión directa con iwconfig...")
+                run(f'iwconfig {interfaz} essid "{essid}" 2>/dev/null')
                 time.sleep(3)
+                run(f"dhclient -v {interfaz} 2>/dev/null")
+                time.sleep(5)
+                _ip_check3 = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
+                if _ip_check3.strip():
+                    _ip_obtenida = _ip_check3.strip().split()[1].split("/")[0]
+                    ok(f"Conectado via iwconfig — IP: {GREEN}{_ip_obtenida}{END}")
+                    _conn_ok = True
 
             if not _conn_ok:
-                warn(f"No se pudo conectar automáticamente. Último error: {_conn_out[:120]}")
-                warn(f"Intentando dhclient como último recurso...")
-                run(f"dhclient {interfaz} 2>/dev/null")
-                time.sleep(3)
-                _ip_check2 = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
-                if _ip_check2.strip():
-                    _ip_obtenida = _ip_check2.strip().split()[1].split("/")[0]
-                    ok(f"Conectado — IP: {GREEN}{_ip_obtenida}{END}")
-                else:
-                    warn(f"Sin IP. Continuando post-explotación sin conexión confirmada...")
+                warn(f"No se pudo conectar. Error: {_conn_out[:150]}")
+                warn(f"Continuando post-explotación sin conexión confirmada...")
 
             post_explotacion()
             return   # post_explotacion ya tiene pause_back al final
