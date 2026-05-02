@@ -236,7 +236,15 @@ class ExploitEngine:
 
     def stop(self):
         self._stop.set()
-        if self._thread: self._thread.join(timeout=2)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        # Si el thread sigue vivo, limpiar pantalla a la fuerza
+        if self._thread and self._thread.is_alive():
+            try:
+                sys.stdout.write("\033[4A" + ("\n" + " " * 100) * 4 + "\r")
+                sys.stdout.flush()
+            except Exception:
+                pass
 
     def done(self, result=None, method=None):
         """Llama al finalizar — marca 100% y detiene display."""
@@ -247,6 +255,12 @@ class ExploitEngine:
             _live_results_append(self.essid, self.bssid, result, method or "desconocido")
         time.sleep(0.3)
         self.stop()
+        # Limpiar líneas residuales del engine en pantalla
+        try:
+            sys.stdout.write("\033[4A" + ("\n" + " " * 100) * 4 + "\r")
+            sys.stdout.flush()
+        except Exception:
+            pass
         self.result = result
         self.method = method
 
