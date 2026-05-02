@@ -587,19 +587,6 @@ def modo_wizard():
         tip("O instala el driver: sudo apt install realtek-rtl88xxau-dkms")
         pause_back(); return
 
-    # Verificación rápida de captura (solo aviso si falla, no aborta)
-    sp_vf = Spinner("Verificando captura de frames (3s)...")
-    sp_vf.start()
-    captura_ok = _verify_monitor_captures(mon_iface, seconds=3)
-    sp_vf.stop()
-
-    if not captura_ok:
-        driver_actual = _get_driver(mon_iface)
-        if "rtl8xxxu" in driver_actual:
-            warn(f"Driver '{driver_actual}' puede tener limitaciones. Continuando de todas formas...")
-            warn("Si el escaneo falla: sudo apt install realtek-rtl8188eus-dkms && sudo reboot")
-        # No abortar — continuar con el flujo
-
     ok(f"Modo monitor activo: {CYAN}{mon_iface}{END}")
 
     # ── PASO 4: Probe Request Harvesting ─────────────────────────────────────
@@ -1257,20 +1244,7 @@ def start_monitor():
     mon = _enable_monitor(interfaz)
     sp.stop()
     run(f"iw dev {mon} info 2>/dev/null | grep -E 'type|addr'", capture=False)
-
-    # Verificar captura real
-    sp_v = Spinner("Comprobando captura de frames (4s)...")
-    sp_v.start()
-    captura_ok = _verify_monitor_captures(mon, seconds=4)
-    sp_v.stop()
-
-    if captura_ok:
-        ok(f"Interfaz monitor: {CYAN}{mon}{END} — captura de frames OK")
-    else:
-        driver_actual = _get_driver(mon)
-        warn(f"Driver '{driver_actual}' activo pero NO captura frames 802.11.")
-        warn("Instala el driver out-of-tree: git clone https://github.com/aircrack-ng/rtl8188eus")
-        warn("  cd rtl8188eus && sudo make && sudo make install && sudo reboot")
+    ok(f"Interfaz monitor: {CYAN}{mon}{END}")
     time.sleep(2)
 
 def stop_monitor():
