@@ -1117,12 +1117,20 @@ def modo_wizard():
 ╚{'═'*60}╝{END}
 """)
 
+    print(f"\n  {WHITE}[ Presiona Enter para continuar... ]{END}", end="", flush=True)
     try:
-        import termios
-        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        with open("/dev/tty", "r") as _tty:
+            _tty.readline()
     except Exception:
-        pass
-    input(f"\n  {WHITE}[ Presiona Enter para continuar... ]{END}\n")
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+        try:
+            input()
+        except Exception:
+            pass
 
     # ── POST-EXPLOTACIÓN (si se obtuvo la clave) ──────────────────────────────
     if clave and metodo not in ("Kr00k CVE-2019-15126",):
@@ -1135,7 +1143,15 @@ def modo_wizard():
             run(f"ip link set {mon_iface} down 2>/dev/null; iw dev {mon_iface} set type managed 2>/dev/null; ip link set {mon_iface} up 2>/dev/null")
             run("systemctl start NetworkManager 2>/dev/null; service networking restart 2>/dev/null")
             ok(f"Red restaurada. Conéctate a '{essid}' con la clave: {GREEN}{clave}{END}")
-            input(f"\n  {DIM}Conéctate a la red y luego presiona Enter para iniciar post-explotación...{END}")
+            print(f"\n  {DIM}Conéctate a la red y luego presiona Enter para iniciar post-explotación...{END}", end="", flush=True)
+            try:
+                with open("/dev/tty", "r") as _tty2:
+                    _tty2.readline()
+            except Exception:
+                try:
+                    input()
+                except Exception:
+                    pass
             post_explotacion()
             return   # post_explotacion ya tiene pause_back al final
 
