@@ -2095,12 +2095,19 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
     time.sleep(1)
 
     # HTTP servidor portal
+    run("fuser -k 80/tcp 2>/dev/null", capture=True)
+    time.sleep(1)
+    HTTPServer.allow_reuse_address = True
     try:
         httpd = HTTPServer(("0.0.0.0", 80), _H)
     except OSError:
         run("fuser -k 80/tcp 2>/dev/null", capture=True)
-        time.sleep(1)
-        httpd = HTTPServer(("0.0.0.0", 80), _H)
+        time.sleep(2)
+        try:
+            httpd = HTTPServer(("0.0.0.0", 80), _H)
+        except OSError:
+            warn("Puerto 80 en uso — usando 8080 para el portal cautivo...")
+            httpd = HTTPServer(("0.0.0.0", 8080), _H)
     _thr.Thread(target=httpd.serve_forever, daemon=True).start()
 
     # Deauth continuo en background
@@ -2458,7 +2465,20 @@ h2{color:#2e7d32;margin-bottom:8px}p{color:#666;font-size:14px}</style>
 <script>setTimeout(()=>location.href='http://google.com',3500)</script>
 </div></body></html>""".encode("utf-8"))
 
-    httpd = HTTPServer(("0.0.0.0", 80), _Handler)
+    # Liberar puerto 80 si está ocupado por sesión anterior
+    run("fuser -k 80/tcp 2>/dev/null; pkill -f 'HTTPServer' 2>/dev/null", capture=True)
+    time.sleep(1)
+    HTTPServer.allow_reuse_address = True
+    try:
+        httpd = HTTPServer(("0.0.0.0", 80), _Handler)
+    except OSError:
+        run("fuser -k 80/tcp 2>/dev/null", capture=True)
+        time.sleep(2)
+        try:
+            httpd = HTTPServer(("0.0.0.0", 80), _Handler)
+        except OSError:
+            warn("Puerto 80 ocupado — usando puerto 8080 para el portal...")
+            httpd = HTTPServer(("0.0.0.0", 8080), _Handler)
     srv_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
 
     # ── Preparar interfaz ─────────────────────────────────────────────────────
@@ -7217,8 +7237,18 @@ def main():
             warn("\nOperación cancelada.")
             time.sleep(1)
         except Exception as e:
-            error(f"Error inesperado: {e}")
-            time.sleep(2)
+            import traceback
+            print(f"\n{RED}{'═'*60}{END}")
+            error(f"ERROR INESPERADO: {e}")
+            print(f"{RED}{'─'*60}{END}")
+            traceback.print_exc()
+            print(f"{RED}{'═'*60}{END}")
+            print(f"\n {WHITE}[Presione Enter para volver al menú]{END}", end="", flush=True)
+            try:
+                with open("/dev/tty", "r") as _tty:
+                    _tty.readline()
+            except Exception:
+                time.sleep(5)
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
