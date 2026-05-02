@@ -92,6 +92,19 @@ class Spinner:
     def stop(self):  self._stop.set(); self._t.join()
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Resultados en vivo — lista compartida entre sesiones del Exploit Engine
+# ─────────────────────────────────────────────────────────────────────────────
+_LIVE_RESULTS: list = []   # [(essid, bssid, clave, metodo, hora)]
+
+def _live_results_append(essid, bssid, clave, metodo):
+    import datetime
+    hora = datetime.datetime.now().strftime("%H:%M:%S")
+    _LIVE_RESULTS.append((essid, bssid, clave, metodo, hora))
+    os.makedirs("exploit-engine", exist_ok=True)
+    with open("exploit-engine/resultados.txt", "a") as _f:
+        _f.write(f"{hora} | {essid:<22} | {bssid} | {clave} | {metodo}\n")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ExploitEngine — Motor de explotación con % en tiempo real
 # ─────────────────────────────────────────────────────────────────────────────
 class ExploitEngine:
@@ -141,6 +154,7 @@ class ExploitEngine:
     def _loop(self):
         frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         i = 0
+        first = True
         while not self._stop.is_set():
             with self._lock:
                 pct   = self.overall
@@ -154,15 +168,35 @@ class ExploitEngine:
             else:             col = GREEN
             bar = col + "█" * filled + END + DIM + "░" * (self.BAR_LEN - filled) + END
             spin = f"{CYAN}{frames[i % len(frames)]}{END}"
+
+            # Panel de resultados en vivo (últimas 3 claves encontradas)
+            if _LIVE_RESULTS:
+                res_lines = []
+                for essid_r, _, clave_r, metodo_r, hora_r in _LIVE_RESULTS[-3:]:
+                    res_lines.append(
+                        f"  {GREEN}[✔]{END} {hora_r}  {WHITE}{essid_r[:22]:<22}{END}  "
+                        f"{GREEN}{clave_r}{END}  {DIM}({metodo_r}){END}"
+                    )
+                panel = "\n".join(res_lines)
+                n_lines = len(res_lines) + 1  # +1 para la barra
+            else:
+                panel = f"  {DIM}── Sin resultados aún ──{END}"
+                n_lines = 2
+
+            if not first:
+                sys.stdout.write(f"\033[{n_lines}A")  # subir N líneas
+
+            sys.stdout.write(panel + "\n")
             sys.stdout.write(
-                f"\r  {spin} {WHITE}[EXPLOIT ENGINE]{END} "
+                f"  {spin} {WHITE}[EXPLOIT ENGINE]{END} "
                 f"[{bar}] {col}{pct:>3}%{END}  "
-                f"{DIM}{pname[:28]}… {cpct}%{END}   "
+                f"{DIM}{pname[:28]}… {cpct}%{END}   \n"
             )
             sys.stdout.flush()
             i += 1
+            first = False
             time.sleep(0.12)
-        sys.stdout.write("\r" + " " * 90 + "\r")
+        sys.stdout.write(f"\033[{n_lines}A" + ("\n" + " " * 90) * n_lines + "\r")
         sys.stdout.flush()
 
     def start(self):
@@ -179,6 +213,8 @@ class ExploitEngine:
         with self._lock:
             self.overall    = 100
             self._phase_pct = 100
+        if result:
+            _live_results_append(self.essid, self.bssid, result, method or "desconocido")
         time.sleep(0.3)
         self.stop()
         self.result = result
