@@ -1398,7 +1398,7 @@ def _evil_twin_monitor(essid: str, bssid: str, channel: str,
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"""<!DOCTYPE html><html><head><meta charset=UTF-8>
+            self.wfile.write("""<!DOCTYPE html><html><head><meta charset=UTF-8>
 <style>body{font-family:Arial;background:#f5f5f5;display:flex;justify-content:center;
 align-items:center;min-height:100vh}.b{background:#fff;padding:40px 30px;border-radius:12px;
 text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%}
@@ -1406,7 +1406,7 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
 <body><div class=b><div class=ok>&#x2705;</div><h2 class=h>Conectado correctamente</h2>
 <p class=p>Su dispositivo se reconect&#xF3; a la red.<br>Redirigiendo...</p>
 <script>setTimeout(()=>location.href='http://google.com',3000)</script>
-</div></body></html>""")
+</div></body></html>""".encode("utf-8"))
 
     # Iniciar airbase-ng (crea at0 en modo monitor)
     ab_proc = subprocess.Popen(
@@ -1770,7 +1770,7 @@ log-dhcp
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"""<!DOCTYPE html><html><head>
+            self.wfile.write("""<!DOCTYPE html><html><head>
 <meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1>
 <title>Conectando...</title>
 <style>body{font-family:Arial,sans-serif;background:#f5f5f5;display:flex;
@@ -1779,11 +1779,11 @@ justify-content:center;align-items:center;min-height:100vh}
 box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:380px;width:90%}
 .ok{font-size:56px;margin-bottom:12px}
 h2{color:#2e7d32;margin-bottom:8px}p{color:#666;font-size:14px}</style>
-</head><body><div class=box><div class=ok>✅</div>
+</head><body><div class=box><div class=ok>&#x2705;</div>
 <h2>Conectado exitosamente</h2>
 <p>Su dispositivo se ha conectado a la red.<br>Redirigiendo...</p>
 <script>setTimeout(()=>location.href='http://google.com',3500)</script>
-</div></body></html>""")
+</div></body></html>""".encode("utf-8"))
 
     httpd = HTTPServer(("192.168.10.1", 80), _Handler)
     srv_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
