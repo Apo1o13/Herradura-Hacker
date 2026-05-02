@@ -1146,19 +1146,48 @@ def modo_wizard():
         do_post = ask("¿Ejecutar Post-Explotación ahora? (conectate primero a la red) (s/n)")
         if do_post.lower() == 's':
             # Restaurar red primero para poder conectarse
+            sp_restore = Spinner("Restaurando interfaz WiFi...")
+            sp_restore.start()
             run(f"airmon-ng stop {mon_iface} 2>/dev/null")
             run(f"ip link set {mon_iface} down 2>/dev/null; iw dev {mon_iface} set type managed 2>/dev/null; ip link set {mon_iface} up 2>/dev/null")
             run("systemctl start NetworkManager 2>/dev/null; service networking restart 2>/dev/null")
-            ok(f"Red restaurada. Conéctate a '{essid}' con la clave: {GREEN}{clave}{END}")
-            print(f"\n  {DIM}Conéctate a la red y luego presiona Enter para iniciar post-explotación...{END}", end="", flush=True)
-            try:
-                with open("/dev/tty", "r") as _tty2:
-                    _tty2.readline()
-            except Exception:
-                try:
-                    input()
-                except Exception:
-                    pass
+            time.sleep(3)
+            sp_restore.stop()
+
+            # Conectar automáticamente desde Kali con nmcli
+            separador("CONECTANDO A LA RED OBJETIVO")
+            _essid_open = (clave in ("SIN CONTRASEÑA", "", None))
+            if _essid_open:
+                info(f"Red abierta — conectando a '{essid}' desde Kali...")
+                _conn_out = run(
+                    f"nmcli dev wifi connect '{essid}' ifname {interfaz} 2>&1",
+                    capture=True
+                ) or ""
+            else:
+                info(f"Conectando a '{essid}' con clave obtenida desde Kali...")
+                _conn_out = run(
+                    f"nmcli dev wifi connect '{essid}' password '{clave}' ifname {interfaz} 2>&1",
+                    capture=True
+                ) or ""
+
+            time.sleep(4)
+            # Verificar si la conexión fue exitosa
+            _ip_check = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
+            if _ip_check.strip():
+                _ip_obtenida = _ip_check.strip().split()[1].split("/")[0]
+                ok(f"Conectado a '{essid}' — IP obtenida: {GREEN}{_ip_obtenida}{END}")
+            else:
+                warn(f"No se obtuvo IP automáticamente. Salida nmcli: {_conn_out[:100]}")
+                warn(f"Intentando con dhclient...")
+                run(f"dhclient {interfaz} 2>/dev/null")
+                time.sleep(3)
+                _ip_check2 = run(f"ip addr show {interfaz} 2>/dev/null | grep 'inet '", capture=True) or ""
+                if _ip_check2.strip():
+                    _ip_obtenida = _ip_check2.strip().split()[1].split("/")[0]
+                    ok(f"Conectado — IP: {GREEN}{_ip_obtenida}{END}")
+                else:
+                    warn(f"Sin IP. Continuando de todas formas con post-explotación...")
+
             post_explotacion()
             return   # post_explotacion ya tiene pause_back al final
 
@@ -3693,12 +3722,15 @@ def post_explotacion():
   • Guarda todo en el historial{END}
     """)
 
-    tip("Asegúrese de estar CONECTADO a la red WiFi objetivo antes de continuar.")
-    continuar = ask("¿Está conectado a la red? (s/n)")
-    if continuar.lower() != "s":
-        info("Conéctese primero y luego use esta opción.")
-        pause_back()
-        return
+    # Verificar si ya hay conexión activa (llamado desde wizard ya conectado)
+    _ya_conectado = run("ip route show default 2>/dev/null", capture=True) or ""
+    if not _ya_conectado.strip():
+        tip("Asegúrese de estar CONECTADO a la red WiFi objetivo antes de continuar.")
+        continuar = ask("¿Está conectado a la red? (s/n)")
+        if continuar.lower() != "s":
+            info("Conéctese primero y luego use esta opción.")
+            pause_back()
+            return
 
     # ── Detectar red local ────────────────────────────────────────────────────
     sp = Spinner("Detectando interfaz y red local...")
