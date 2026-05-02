@@ -58,6 +58,20 @@ def tip(msg):     print(f" {DIM}  ↳ {msg}{END}")
 def ask(msg):     return input(f" {GREEN}>>{END} {WHITE}{msg}{END}: ").strip()
 def ok(msg):      print(f" {GREEN}[✔]{END} {GREEN}{msg}{END}")
 
+def _parse_aircrack_key(output: str) -> str | None:
+    """Extrae la clave de la salida de aircrack-ng. Rechaza BSSIDs falsos."""
+    if "key found" not in output.lower():
+        return None
+    for pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
+        m = re.search(pat, output, re.IGNORECASE)
+        if m:
+            k = m.group(1).strip()
+            # Rechazar si parece un MAC/BSSID (XX:XX:XX:XX:XX o XX:XX:XX:XX:XX:XX)
+            if re.fullmatch(r'([0-9A-Fa-f]{2}:){4,5}[0-9A-Fa-f]{2}', k):
+                continue
+            return k
+    return None
+
 def separador(titulo=""):
     if titulo:
         pad = (60 - len(titulo)) // 2
@@ -819,12 +833,7 @@ def modo_wizard():
             sp_wc.start()
             _wep_res = run(f"aircrack-ng {_wep_cap_file} 2>/dev/null", capture=True) or ""
             sp_wc.stop()
-            _wep_key = None
-            for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
-                _wm = re.search(_pat, _wep_res, re.IGNORECASE)
-                if _wm:
-                    _wep_key = _wm.group(1).strip()
-                    break
+            _wep_key = _parse_aircrack_key(_wep_res)
             clave = _wep_key or "encontrada (ver salida)"
             if _wep_key:
                 metodo = "WEP ARP-replay + aircrack"
@@ -3443,14 +3452,9 @@ def wep_full_attack():
     result = run(f"aircrack-ng {cap_file}", capture=True) or ""
     sp.stop()
 
-    if "key found" in result.lower():
-        _wep_key = None
-        for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
-            _wm = re.search(_pat, result, re.IGNORECASE)
-            if _wm:
-                _wep_key = _wm.group(1).strip()
-                break
-        clave = _wep_key or "encontrada (ver salida)"
+    _wep_key = _parse_aircrack_key(result)
+    if _wep_key:
+        clave = _wep_key
         ok(f"CLAVE WEP: {GREEN}{clave}{END}")
         aid = db_log_attack("WEP Attack", essid, bssid, channel, "crackeada", cap_file)
         db_log_password(aid, essid, bssid, clave, "aircrack-ng WEP")
@@ -4460,12 +4464,7 @@ def auto_pwner():
             cap_p.terminate(); time.sleep(2)
             cap_file = out_base + "-01.cap"
             res = run(f"aircrack-ng {cap_file} 2>/dev/null", capture=True) or ""
-            _wep_key = None
-            for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
-                _wm = re.search(_pat, res, re.IGNORECASE)
-                if _wm:
-                    _wep_key = _wm.group(1).strip()
-                    break
+            _wep_key = _parse_aircrack_key(res)
             clave = _wep_key or "encontrada (ver salida)"
             if _wep_key:
                 ok(f"WEP CRACKEADA: {GREEN}{clave}{END}")
@@ -6300,13 +6299,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 f"aircrack-ng {cap_file} -w {wordlist} 2>/dev/null",
                 capture=True
             ) or ""
-            _wep_key = None
-            for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
-                _wm = re.search(_pat, ac_out, re.I)
-                if _wm:
-                    _wep_key = _wm.group(1).strip()
-                    break
-            km = _wep_key
+            km = _parse_aircrack_key(ac_out)
             if km:
                 clave = km; metodo = "Handshake + aircrack-ng"
                 eng.done(clave, metodo); return clave, metodo
