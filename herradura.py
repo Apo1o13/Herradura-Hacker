@@ -3693,9 +3693,20 @@ def post_explotacion():
     seen_ips = set()
 
     def _add_device(ip, mac="??:??:??:??:??:??", vendor=""):
-        if ip and ip not in seen_ips:
+        if not ip:
+            return
+        if ip not in seen_ips:
             seen_ips.add(ip)
             devices.append({"ip": ip, "mac": mac, "vendor": vendor})
+        else:
+            # Actualizar vendor/mac si se consiguió info mejor
+            for dev in devices:
+                if dev["ip"] == ip:
+                    if vendor and not dev.get("vendor") or dev.get("vendor") in ("", "Desconocido", "(Unknown)"):
+                        dev["vendor"] = vendor
+                    if mac and mac != "??:??:??:??:??:??" and dev.get("mac","").startswith("??"):
+                        dev["mac"] = mac
+                    break
 
     # Método 1: tabla ARP del sistema (instantáneo, no requiere herramientas extra)
     neigh_out = run("ip neigh show 2>/dev/null", capture=True) or ""
@@ -3933,12 +3944,14 @@ def post_explotacion():
         separador(f"ESCANEANDO {ip} ({vendor})")
 
         # Detectar tipo de dispositivo por vendor/MAC para ajustar puertos
-        is_hikvision = "hikvision" in vendor.lower()
-        is_mikrotik  = any(x in (d.get("mac","")).lower() for x in ["b8:27","bc:24:11"])
+        mac_lower    = d.get("mac","").lower()
+        is_hikvision = "hikvision" in vendor.lower() or mac_lower.startswith("64:db:8b")
+        is_mikrotik  = "bc:24:11" in mac_lower or "mikrotik" in vendor.lower()
+        is_camera    = any(x in vendor.lower() for x in ["hikvision","dahua","axis","vivotek","reolink"])
         extra_ports  = ""
-        if is_hikvision:
-            extra_ports = ",554,8000,8080,37777"
-            info(f"Cámara Hikvision detectada — escaneando puertos específicos...")
+        if is_hikvision or is_camera:
+            extra_ports = ",554,8000,8080,8443,37777"
+            info(f"Cámara IP detectada — escaneando puertos específicos (554,8000,37777)...")
         elif is_mikrotik:
             extra_ports = ",8291,8728,8729"
             info(f"Mikrotik detectado — escaneando puertos de gestión...")
