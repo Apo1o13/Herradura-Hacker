@@ -808,7 +808,7 @@ def modo_wizard():
             _wep_res = run(f"aircrack-ng {_wep_cap_file} 2>/dev/null", capture=True) or ""
             sp_wc.stop()
             _wep_key = None
-            for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+            for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
                 _wm = re.search(_pat, _wep_res, re.IGNORECASE)
                 if _wm:
                     _wep_key = _wm.group(1).strip()
@@ -3433,7 +3433,7 @@ def wep_full_attack():
 
     if "key found" in result.lower():
         _wep_key = None
-        for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+        for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
             _wm = re.search(_pat, result, re.IGNORECASE)
             if _wm:
                 _wep_key = _wm.group(1).strip()
@@ -4449,7 +4449,7 @@ def auto_pwner():
             cap_file = out_base + "-01.cap"
             res = run(f"aircrack-ng {cap_file} 2>/dev/null", capture=True) or ""
             _wep_key = None
-            for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+            for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
                 _wm = re.search(_pat, res, re.IGNORECASE)
                 if _wm:
                     _wep_key = _wm.group(1).strip()
@@ -6289,7 +6289,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 capture=True
             ) or ""
             _wep_key = None
-            for _pat in [r'KEY FOUND.*?\[\s*(.+?)\s*\]', r'KEY FOUND[:\s]+([0-9A-Fa-f:]{5,})', r'(\b(?:[0-9A-Fa-f]{2}:){4}[0-9A-Fa-f]{2}\b)']:
+            for _pat in [r'KEY FOUND[^[]*\[\s*(.+?)\s*\]', r'KEY FOUND[!:\s]+\[\s*(.+?)\s*\]']:
                 _wm = re.search(_pat, ac_out, re.I)
                 if _wm:
                     _wep_key = _wm.group(1).strip()
