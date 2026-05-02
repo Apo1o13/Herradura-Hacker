@@ -587,28 +587,18 @@ def modo_wizard():
         tip("O instala el driver: sudo apt install realtek-rtl88xxau-dkms")
         pause_back(); return
 
-    # Verificar que el driver realmente captura frames (rtl8xxxu reporta monitor
-    # pero no captura — necesita el driver out-of-tree 8188eu)
-    sp_vf = Spinner("Verificando captura real de frames (4s)...")
+    # Verificación rápida de captura (solo aviso si falla, no aborta)
+    sp_vf = Spinner("Verificando captura de frames (3s)...")
     sp_vf.start()
-    captura_ok = _verify_monitor_captures(mon_iface, seconds=4)
+    captura_ok = _verify_monitor_captures(mon_iface, seconds=3)
     sp_vf.stop()
 
     if not captura_ok:
         driver_actual = _get_driver(mon_iface)
-        warn(f"El driver '{driver_actual}' NO captura frames 802.11 reales.")
-        warn("El modo monitor del kernel está activo pero el firmware no lo soporta.")
-        print()
-        print(f"  {WHITE}Solución para TL-WN722N v2/v3 (RTL8188EUS):{END}")
-        print(f"  {CYAN}1.{END} sudo apt install dkms build-essential linux-headers-$(uname -r)")
-        print(f"  {CYAN}2.{END} git clone https://github.com/aircrack-ng/rtl8188eus /tmp/rtl8188eus")
-        print(f"  {CYAN}3.{END} cd /tmp/rtl8188eus && sudo make && sudo make install")
-        print(f"  {CYAN}4.{END} echo 'blacklist rtl8xxxu' | sudo tee /etc/modprobe.d/rtl8xxxu-blacklist.conf")
-        print(f"  {CYAN}5.{END} sudo reboot")
-        print()
-        run(f"airmon-ng stop {mon_iface} 2>/dev/null")
-        run("systemctl start NetworkManager 2>/dev/null")
-        pause_back(); return
+        if "rtl8xxxu" in driver_actual:
+            warn(f"Driver '{driver_actual}' puede tener limitaciones. Continuando de todas formas...")
+            warn("Si el escaneo falla: sudo apt install realtek-rtl8188eus-dkms && sudo reboot")
+        # No abortar — continuar con el flujo
 
     ok(f"Modo monitor activo: {CYAN}{mon_iface}{END}")
 
