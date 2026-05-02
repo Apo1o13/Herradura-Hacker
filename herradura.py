@@ -66,6 +66,12 @@ def separador(titulo=""):
         print(f" {WHITE}{'─'*62}{END}")
 
 def pause_back():
+    # Limpiar buffer de stdin para que no consuma \n residuales de preguntas anteriores
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
     input(f"\n {WHITE}[Presione Enter para volver al menú]{END}")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1079,6 +1085,11 @@ def modo_wizard():
 ╚{'═'*60}╝{END}
 """)
 
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
     input(f"\n  {WHITE}[ Presiona Enter para continuar... ]{END}\n")
 
     # ── POST-EXPLOTACIÓN (si se obtuvo la clave) ──────────────────────────────
