@@ -682,17 +682,31 @@ def modo_wizard():
     scored.sort(key=lambda x: x[0], reverse=True)
 
     separador("REDES DETECTADAS — ORDENADAS POR VULNERABILIDAD")
-    print(f"  {WHITE}{'#':<4} {'ESSID':<24} {'SEGURIDAD':<12} {'SCORE':<7} {'VECTOR'}{END}")
+    print(f"  {WHITE}{'#':<4} {'ESSID':<24} {'SEGURIDAD':<12} {'SCORE':<7} {'PWR':<6} {'VECTOR'}{END}")
     separador()
     for i, (sc, vv, r) in enumerate(scored, 1):
         col = RED if sc >= 80 else YELLOW if sc >= 50 else GREEN
+        # Señal / potencia
+        try:
+            _pwr = int(r.get("power", -100) or -100)
+        except (ValueError, TypeError):
+            _pwr = -100
+        if _pwr >= -50:
+            _pwr_col = GREEN;  _pwr_bar = "████"   # muy cerca
+        elif _pwr >= -65:
+            _pwr_col = YELLOW; _pwr_bar = "███░"   # cerca
+        elif _pwr >= -80:
+            _pwr_col = MAGENTA;_pwr_bar = "██░░"   # medio
+        else:
+            _pwr_col = RED;    _pwr_bar = "█░░░"   # lejos
+        _pwr_str = f"{_pwr_col}{_pwr_bar}{END}"
         # Marcar redes buscadas por probes
         _probe_mark = f" {CYAN}[buscada]{END}" if any(
             r['essid'] in ssids for ssids in _probes_encontrados.values()
         ) else ""
         print(f"  {WHITE}[{i:>2}]{END} {CYAN}{r['essid'][:22]:<24}{END} "
               f"{YELLOW}{r['privacy'][:10]:<12}{END} "
-              f"{col}{sc:<7}{END} {DIM}{','.join(vv[:2])}{END}{_probe_mark}")
+              f"{col}{sc:<7}{END} {_pwr_str}  {DIM}{','.join(vv[:2])}{END}{_probe_mark}")
     separador()
 
     # ── PASO 6: Elegir objetivo ───────────────────────────────────────────────
