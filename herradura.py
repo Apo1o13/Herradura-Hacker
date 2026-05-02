@@ -66,13 +66,23 @@ def separador(titulo=""):
         print(f" {WHITE}{'─'*62}{END}")
 
 def pause_back():
-    # Limpiar buffer de stdin para que no consuma \n residuales de preguntas anteriores
+    # Drenar cualquier \n residual del buffer de stdin
     try:
         import termios
         termios.tcflush(sys.stdin, termios.TCIFLUSH)
     except Exception:
         pass
-    input(f"\n {WHITE}[Presione Enter para volver al menú]{END}")
+    print(f"\n {WHITE}[Presione Enter para volver al menú]{END}", end="", flush=True)
+    # Leer desde /dev/tty (terminal real) para evitar que subprocesos
+    # que cerraron/vaciaron sys.stdin causen retorno automático
+    try:
+        with open("/dev/tty", "r") as tty:
+            tty.readline()
+    except Exception:
+        try:
+            input()
+        except Exception:
+            pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Spinner de progreso
@@ -255,10 +265,12 @@ def run(cmd, capture=False):
             # Extraer segundos del timeout para poner safety net en subprocess
             m = _re.search(r'timeout\s+(?:--kill-after=\d+\s+)?(\d+)', cmd)
             py_timeout = int(m.group(1)) + 15 if m else None
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=py_timeout)
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               timeout=py_timeout, stdin=subprocess.DEVNULL)
             return r.stdout + r.stderr
         else:
-            subprocess.run(cmd, shell=True)
+            # stdin=DEVNULL evita que subprocesos consuman el Enter del usuario
+            subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL)
     except (KeyboardInterrupt, subprocess.TimeoutExpired):
         pass
 
