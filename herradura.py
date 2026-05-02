@@ -533,17 +533,18 @@ def modo_wizard():
     separador("MODO GUIADO — ARSENAL COMPLETO AUTOMATICO")
     print(f"""
   {WHITE}Flujo totalmente automático con TODOS los ataques:{END}
-  {GREEN}  1.{END} Falsifica tu MAC (stealth opcional)
-  {GREEN}  2.{END} Activa modo monitor y captura probes de dispositivos
-  {GREEN}  3.{END} Escanea redes y las puntúa por vulnerabilidad
-  {GREEN}  4.{END} Tú eliges el objetivo (o auto-selecciona el más vulnerable)
-  {GREEN}  5.{END} KARMA lanzado en background (captura otras redes)
-  {GREEN}  6.{END} Detecta tipo de red y lanza el ataque correcto:
-          {DIM}WEP → crack automático | OPEN → acceso directo
-          Enterprise → RADIUS falso | WPA3 → Dragonblood
+  {GREEN}[Paso 1]{END} Detecta el adaptador WiFi automáticamente
+  {GREEN}[Paso 2]{END} Falsifica tu MAC (stealth opcional)
+  {GREEN}[Paso 3]{END} Activa modo monitor
+  {GREEN}[Paso 4]{END} Captura Probe Requests de dispositivos cercanos
+  {GREEN}[Paso 5]{END} Escanea redes y las puntúa por vulnerabilidad
+  {GREEN}[Paso 6]{END} Tú eliges el objetivo (o auto-selecciona el más vulnerable)
+  {GREEN}[Paso 7]{END} Si el SSID está oculto, lo revela automáticamente
+  {GREEN}[Paso 8]{END} KARMA en background + ataque correcto según tipo de red:
+          {DIM}WEP → crack automático  |  OPEN → acceso directo
+          Enterprise → RADIUS falso  |  WPA3 → Dragonblood
           WPA/WPA2 → Evil Twin + Exploit Engine 10 fases + Kr00k{END}
-  {GREEN}  7.{END} Post-explotación en la red comprometida
-  {GREEN}  8.{END} Genera reporte HTML profesional
+  {GREEN}  +  {END} Post-explotación y reporte HTML al finalizar
     """)
 
     continuar = ask("¿Continuar? (s/n)")
