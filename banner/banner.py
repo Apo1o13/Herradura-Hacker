@@ -109,8 +109,8 @@ def menu():
     print(_top())
 
     # Modo guiado highlight
-    wv = "[W]  MODO GUIADO  \u2190 empieza aqui si eres nuevo"
-    wc = f"{GREEN}[W]{END}  {WHITE}MODO GUIADO{END}  {DIM}\u2190 empieza aqui si eres nuevo{END}"
+    wv = "[W]  MODO GUIADO COMPLETO  \u2190 TODOS los ataques automaticos"
+    wc = f"{GREEN}[W]{END}  {WHITE}MODO GUIADO COMPLETO{END}  {DIM}\u2190 TODOS los ataques automaticos{END}"
     print(_row(wv, wc))
 
     print(_sep(title="AUTOMATICOS  RECOMENDADOS"))

