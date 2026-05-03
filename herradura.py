@@ -294,6 +294,7 @@ def run(cmd, capture=False):
             m = _re.search(r'timeout\s+(?:--kill-after=\d+\s+)?(\d+)', cmd)
             py_timeout = int(m.group(1)) + 15 if m else None
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               encoding='utf-8', errors='replace',
                                timeout=py_timeout, stdin=subprocess.DEVNULL)
             return r.stdout + r.stderr
         else:
