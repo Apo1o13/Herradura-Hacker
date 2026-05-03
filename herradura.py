@@ -1229,7 +1229,20 @@ def modo_wizard():
     if clave and metodo not in ("Kr00k CVE-2019-15126",):
         separador("POST-EXPLOTACIÓN")
         print(f"  {DIM}Con la clave obtenida puedes conectarte a la red y analizar dispositivos.{END}")
-        do_post = ask("¿Ejecutar Post-Explotación ahora? (conectate primero a la red) (s/n)")
+        # Limpiar stdin residual antes de preguntar (subprocesos dejan \n en buffer)
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+        time.sleep(0.3)
+        print(f" {GREEN}>>{END} {WHITE}¿Ejecutar Post-Explotación ahora? (conectate primero a la red) (s/n){END}: ",
+              end="", flush=True)
+        try:
+            with open("/dev/tty", "r") as _tty2:
+                do_post = _tty2.readline().strip()
+        except Exception:
+            do_post = input().strip()
         if do_post.lower() == 's':
             # Restaurar red primero para poder conectarse
             sp_restore = Spinner("Restaurando interfaz WiFi...")
@@ -1321,7 +1334,18 @@ def modo_wizard():
     ok("Red restaurada. Ya puedes navegar normalmente.")
 
     separador("MODO GUIADO COMPLETO")
-    gen = ask("¿Generar reporte HTML? (s/n)")
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+    time.sleep(0.3)
+    print(f" {GREEN}>>{END} {WHITE}¿Generar reporte HTML? (s/n){END}: ", end="", flush=True)
+    try:
+        with open("/dev/tty", "r") as _tty3:
+            gen = _tty3.readline().strip()
+    except Exception:
+        gen = input().strip()
     if gen.lower() == 's':
         generate_report()
     else:
