@@ -4894,7 +4894,19 @@ def auto_pwner():
         print(f"  {CYAN}{essid_r[:26]:<28}{END} {WHITE}{metodo:<20}{END} {rc}")
 
     print()
-    gen = ask("¿Generar reporte HTML ahora? (s/n)")
+    # Limpiar stdin residual de subprocesos antes de pedir input
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+    time.sleep(0.3)
+    print(f" {GREEN}>>{END} {WHITE}¿Generar reporte HTML ahora? (s/n){END}: ", end="", flush=True)
+    try:
+        with open("/dev/tty", "r") as tty:
+            gen = tty.readline().strip()
+    except Exception:
+        gen = input().strip()
     if gen.lower() == "s":
         generate_report()
     else:
@@ -6923,23 +6935,39 @@ def exploit_engine():
     step(2, "Iniciando Exploit Engine...")
     print()
     clave, metodo = smart_exploit_target(eng)
-    print()
 
+    # Limpiar stdin de cualquier \n residual de subprocesos antes de mostrar resultado
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+    print()
     # ── Resultado ─────────────────────────────────────────────────────────────
     separador("RESULTADO")
     if clave:
-        ok(f"CLAVE ENCONTRADA: {GREEN}{clave}{END}")
-        ok(f"Método:           {WHITE}{metodo}{END}")
+        print(f"\n  {'█'*50}")
+        ok(f"  CLAVE ENCONTRADA: {GREEN}{clave}{END}")
+        ok(f"  Método:           {WHITE}{metodo}{END}")
+        print(f"  {'█'*50}\n")
         aid = db_log_attack("Exploit Engine", essid, bssid, channel,
                             f"crackeada:{clave}")
         db_log_password(aid, essid, bssid, clave, metodo)
-        print(f"\n  {WHITE}Credenciales guardadas en el historial.{END}")
+        print(f"  {WHITE}Credenciales guardadas en el historial.{END}")
     else:
         warn("No se encontró la clave con los vectores disponibles.")
         tip("Pruebe con un diccionario más completo o verifique que el objetivo tiene WPS/WPA activo.")
 
     separador()
-    gen = ask("¿Generar reporte HTML? (s/n)")
+    # Usar /dev/tty para evitar que stdin buffereado consuma la respuesta
+    print(f" {GREEN}>>{END} {WHITE}¿Generar reporte HTML? (s/n){END}: ", end="", flush=True)
+    try:
+        with open("/dev/tty", "r") as tty:
+            gen = tty.readline().strip()
+    except Exception:
+        gen = input().strip()
     if gen.lower() == "s":
         generate_report()
     else:
