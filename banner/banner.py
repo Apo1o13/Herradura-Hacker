@@ -62,24 +62,19 @@ def _double_sep(title=""):
         return f"{m}{GREEN}╠{l} {RED}{title}{GREEN} {r}╣{END}"
     return f"{m}{GREEN}╠{'═' * BOX_W}╣{END}"
 
-# ── Logo herradura (braille art) ─────────────────────────────────────────────
+# ── Logo herradura (ASCII art) ───────────────────────────────────────────────
 _LOGO_LINES = [
-    "⠀⠀⠀⠀⢀⣠⣴⣶⣿⣿⣿⣿⣿⣿⣶⣦⣄⡀⠀⠀⠀⠀",
-    "⠀⠀⢀⣴⣿⣿⠿⢿⣿⣿⣉⣉⣿⣿⡿⠿⣿⣿⣦⡀⠀⠀",
-    "⠀⣴⣿⣿⣿⣇⣤⣾⣿⣿⣿⣿⣿⣿⣷⣤⣸⣿⣿⣿⣦⠀",
-    "⣰⣿⡿⠋⣻⣿⣿⠟⠉⠉⠀⠀⠉⠙⠻⣿⣿⣟⠙⢿⣿⣆",
-    "⣿⣿⣧⣴⣿⣿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⣿⣦⣼⣿⣿",
-    "⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿",
-    "⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿",
-    "⢻⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣿⣿⡟",
-    "⠈⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⠁",
-    "⠀⠹⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣿⣿⠏⠀",
-    "⠀⠀⠹⣿⣿⣿⣿⡄⠀⠀⠀⠀⠀⠀⢠⣿⣿⣿⣿⠏⠀⠀",
-    "⢠⣶⣶⣿⣿⣿⣿⣷⠀⠀⠀⠀⠀⠀⣾⣿⣿⣿⣿⣶⣶⡄",
-    "⠸⣿⣿⣿⣿⣿⣿⠟⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣿⣿⠇",
+    "      ╭─────────────────────────────╮",
+    "    ╭─╯                             ╰─╮",
+    "   ╭╯   ┌─────────────────────────┐   ╰╮",
+    "   │    │   H E R R A D U R A    │    │",
+    "   │    │     H A C K   v 5.0    │    │",
+    "   │    └─────────────────────────┘    │",
+    "    ╰─╮                             ╭─╯",
+    "      ╰──╮                       ╭──╯",
+    "          │                     │",
+    "          ╰─────────────────────╯",
 ]
-# Ancho visual del logo (cada char braille ocupa 1 col)
-_LOGO_W = 22
 
 def banner():
     os.system("clear")
@@ -87,10 +82,10 @@ def banner():
     now = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
     # ── Logo herradura centrado ───────────────────────────────────────────────
-    logo_pad = " " * max(0, (tw - _LOGO_W) // 2)
     print()
     for line in _LOGO_LINES:
-        print(f"{GREEN}{logo_pad}{line}{END}")
+        lpad = " " * max(0, (tw - len(line)) // 2)
+        print(f"{GREEN}{lpad}{line}{END}")
     print()
 
     # ── Barra de info tipo terminal ───────────────────────────────────────────
@@ -191,21 +186,21 @@ def menu():
 
     # ── ATAQUES WiFi ──────────────────────────────────────────────────────────
     print(dsep("◈  ATAQUES  WiFi  ◈"))
-    print(row2("[ 7]", "Handshake WPA/WPA2",  "captura + crackea clave",   GREEN,
+    print(row2("[ 7]", "Handshake WPA/WPA2",  "captura + crackea",         GREEN,
                "[ 9]", "PMKID",               "sin esperar clientes",      YELLOW))
     print(row2("[10]", "WPS Pixie / PIN",      "explota WPS del router",    GREEN,
-               "[15]", "Evil Twin + Portal",   "red falsa + pagina login",  RED))
+               "[15]", "Evil Twin + Portal",   "AP falso + portal web",     RED))
     print(row2("[21]", "KARMA / MANA",         "acepta cualquier probe",    RED,
                "[23]", "WPA Enterprise",       "captura hash MSCHAPv2",     MAGENTA))
     print(row2("[25]", "WEP Full Attack",      "ARP replay + crack",        GREEN,
                "[17]", "Auto-Crack",           "flujo completo automatico", YELLOW))
     print(row2("[13]", "Deautenticacion",      "desconecta clientes",       GREEN,
-               "[27]", "SSID Oculto Revealer", "revela SSIDs escondidos",   YELLOW))
+               "[27]", "SSID Oculto Revealer", "revela SSIDs ocultos",      YELLOW))
 
     # ── AVANZADO / CVEs ───────────────────────────────────────────────────────
     print(dsep("◈  AVANZADO  /  CVEs  ◈"))
-    print(row2("[32]", "Vulns Modernas 2025",  "KRACK, Frag, Dragonblood", RED,
-               "[34]", "Suite CVE 2019-2024",  "Kr00k, EAP, FragAttacks",  MAGENTA))
+    print(row2("[32]", "Vulns Modernas 2025",  "KRACK, Frag, Dragon",      RED,
+               "[34]", "Suite CVE 2019-2024",  "Kr00k, EAP, Frag",         MAGENTA))
     print(row2("[28]", "Post-Explotacion",     "escanea la LAN interna",   RED,
                "[26]", "Deauth Hopping",       "deauth multi-canal",        GREEN))
     print(row2("[22]", "Probe Harvester",      "ve que redes buscan devs", YELLOW,
