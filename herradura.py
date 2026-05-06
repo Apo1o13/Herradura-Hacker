@@ -585,7 +585,7 @@ def _modo_persistente(essid, bssid, channel, iface, wordlist):
                 label = f"Pasada {pasada} · máscara {mask}"
                 cmd_m = (f"hashcat -m 22000 -O {hc} -a 3 '{mask}' --force "
                          f"--machine-readable --status --status-timer=3 --quiet 2>/dev/null")
-                pot   = _run_hashcat_persistent.__wrapped__(hc, "", "", label) if hasattr(_run_hashcat_persistent, '__wrapped__') else ""
+                pot   = ""
                 # Simplified mask run
                 proc_m = subprocess.Popen(cmd_m, shell=True, stdout=subprocess.PIPE,
                                           stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
@@ -1423,7 +1423,7 @@ def modo_wizard():
             eng.done(clave, metodo)   # para el display thread limpiamente
 
         # Detener Evil Twin si estaba corriendo
-        if not clave and "_twin_stop" in dir():
+        if not clave and "_twin_stop" in locals():
             _twin_stop.set()
             time.sleep(1)
             if _twin_result.get("clave"):
@@ -4712,7 +4712,7 @@ def post_explotacion():
         # Guardar en BD
         db_log_device(
             ip, d.get("mac",""), vendor,
-            d.get("ip",""), "; ".join(open_ports), vuln_str
+            d.get("hostname",""), "; ".join(open_ports), vuln_str
         )
 
     separador("ESCANEO COMPLETADO")
