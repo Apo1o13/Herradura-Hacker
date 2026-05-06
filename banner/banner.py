@@ -62,83 +62,80 @@ def _double_sep(title=""):
         return f"{m}{GREEN}╠{l} {RED}{title}{GREEN} {r}╣{END}"
     return f"{m}{GREEN}╠{'═' * BOX_W}╣{END}"
 
-# ── ASCII Art ─────────────────────────────────────────────────────────────────
-_LOGO = [
-    r"  (((  (((  (((  WiFi  )))  )))  )))",
-    r"   \\   __ _____  _______  ___  ",
-    r"    \\ /  |  ___||  ___  ||   \ ",
-    r"     \\|  | |__  | |___| ||    |",
-    r"     /\|  |  __| |  ___  ||    |",
-    r"    // \  | |___ | |   | ||___/ ",
-    r"   //   \_|_____||_|   |_||_|   ",
-    r"  ///  HERRADURA HACK  v5.0  \\\ ",
+# ── ASCII Art: "HACK" en letras grandes ──────────────────────────────────────
+_HACK_LINES = [
+    " _   _   _    ____  _  __",
+    "| | | | / \\  / ___|| |/ /",
+    "| |_| |/ _ \\| |    | ' / ",
+    "|  _  / ___ \\ |___ | . \\ ",
+    "|_| |_/_/   \\_\\____|_|\\_\\",
 ]
 
-_SIGNAL = [
-    r"    )  )  )  )))  (  (  (    ",
-    r"   )  ) ╔═══════════╗ (  (   ",
-    r"  )  ) ╔╣ ▓▓▓▓░░░░░ ╠╗ (  ( ",
-    r"  )  ) ║╚╦═══════════╦╝║ (  (",
-    r"  )  ) ║ ║  [ARMED]  ║ ║ (  (",
-    r"  )  ) ║╔╩═══════════╩╗║ (  (",
-    r"  )  ) ╚╣ TARGET LOCK ╠╝ (  (",
-    r"   )  ) ╚═════════════╝ (  ) ",
-    r"    )  )  )  )))  (  (  (    ",
+# ── Señal WiFi decorativa (arriba del texto HACK) ────────────────────────────
+_WIFI_RINGS = [
+    "          . : : . : : . : : .",
+    "       .:    ( (  WiFi  ) )    :.",
+    "     .:   (    ───────────    )   :.",
+    "    :.   (   [ HERRADURA ]   )   .:",
+    "     ':   (    ───────────    )   :'",
+    "       ':    ( (  v5.0  ) )    :'",
+    "          ' : : ' : : ' : : '",
 ]
 
 def banner():
     os.system("clear")
     tw = _tw()
-
-    # ── Logo central ─────────────────────────────────────────────────────────
     now = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
-    # Elige logo según ancho de terminal
-    if tw >= 100:
-        art = _SIGNAL
-        art_colors = [
-            DIM, RED, RED, RED, f"{GREEN}", f"{RED}", f"{GREEN}", DIM, DIM
-        ]
-    else:
-        art = _LOGO
-        art_colors = [
-            DIM, GREEN, GREEN, GREEN, GREEN, GREEN, GREEN, RED
-        ]
-
+    # ── Anillos WiFi ─────────────────────────────────────────────────────────
+    ring_colors = [DIM, CYAN, CYAN, GREEN, CYAN, CYAN, DIM]
     print()
-    for line, col in zip(art, art_colors):
+    for line, col in zip(_WIFI_RINGS, ring_colors):
         pad = " " * max(0, (tw - len(line)) // 2)
         print(f"{col}{pad}{line}{END}")
+
+    # ── "HACK" en ASCII grande ────────────────────────────────────────────────
+    print()
+    for line in _HACK_LINES:
+        pad = " " * max(0, (tw - len(line)) // 2)
+        print(f"{GREEN}{pad}{line}{END}")
     print()
 
-    # ── Título estilo "terminal breach" ──────────────────────────────────────
-    breach_art = [
-        f"  {DIM}╔{'─'*20}╗                    ╔{'─'*20}╗{END}",
-        f"  {DIM}│{END}{RED}  0x48 0x41 0x43 0x4B{END}  {DIM}│                    │{END}{GREEN}  WiFi  Pentest Suite {END}{DIM}│{END}",
-        f"  {DIM}╚{'─'*20}╝                    ╚{'─'*20}╝{END}",
-    ]
-    for line in breach_art:
-        pad = " " * max(0, (tw - 58) // 2)
-        print(f"{pad}{line}")
-    print()
+    # ── Barra de info tipo terminal ───────────────────────────────────────────
+    bar_w = min(tw - 4, 72)           # ancho total incluyendo bordes │...│
+    inner = bar_w - 2                 # contenido visible entre │ y │
+    pad_b = " " * max(0, (tw - bar_w) // 2)
 
-    # ── Líneas de título ──────────────────────────────────────────────────────
-    def _cline(text_vis, text_col):
-        pad = " " * max(0, (tw - len(text_vis)) // 2)
-        print(f"{pad}{text_col}")
+    def _bar_line(left_vis, left_col, right_vis, right_col, fill="─"):
+        """Construye una fila de barra con relleno exacto."""
+        gap = inner - 2 - len(left_vis) - len(right_vis)  # 2 = leading spaces
+        dashes = fill * max(1, gap)
+        return f"{DIM}│{END}  {left_col}{DIM}{dashes}{END}{right_col}{DIM}│{END}"
 
-    _cline(
-        "[ HERRADURA HACK ]──────────────────────[ v5.0 ]",
-        f"{DIM}[{END} {RED}HERRADURA{END} {WHITE}HACK{END} {DIM}]{'─'*22}[{END} {GREEN}v5.0{END} {DIM}]{END}"
-    )
-    _cline(
-        "[ by Apo1o13 ]────────────────────────[ KALI LINUX ]",
-        f"{DIM}[{END} {CYAN}by Apo1o13{END} {DIM}]{'─'*22}[{END} {YELLOW}KALI LINUX{END} {DIM}]{END}"
-    )
-    _cline(
-        f"[ {now} ]──────────────────[ USE ONLY ON AUTHORIZED TARGETS ]",
-        f"{DIM}[{END} {DIM}{now}{END} {DIM}]{'─'*6}[{END} {DIM}USE ONLY ON AUTHORIZED TARGETS{END} {DIM}]{END}"
-    )
+    bar_top  = f"{DIM}┌{'─'*inner}┐{END}"
+    bar_bot  = f"{DIM}└{'─'*inner}┘{END}"
+
+    line1_lv = "[root@herradura]─[WiFi Pentest Suite]"
+    line1_lc = f"{RED}[root@herradura]{END}{DIM}─{END}{GREEN}[WiFi Pentest Suite]{END}"
+    line1_rv = "[Apo1o13]"
+    line1_rc = f"{DIM}[{END}{YELLOW}Apo1o13{END}{DIM}]{END}"
+
+    line2_lv = "└──╼ sudo python3 herradura.py"
+    line2_lc = f"{DIM}└──╼{END} {CYAN}sudo python3 herradura.py{END}"
+    line2_rv = "[v5.0]"
+    line2_rc = f"{DIM}[{END}{GREEN}v5.0{END}{DIM}]{END}"
+
+    line3_lv = "[✔] TARGET ACQUIRED"
+    line3_lc = f"{GREEN}[✔]{END} {WHITE}TARGET ACQUIRED{END}"
+    line3_rv = f"[{now}]"
+    line3_rc = f"{DIM}[{END}{DIM}{now}{END}{DIM}]{END}"
+
+    for line in [bar_top,
+                 _bar_line(line1_lv, line1_lc, line1_rv, line1_rc),
+                 _bar_line(line2_lv, line2_lc, line2_rv, line2_rc),
+                 _bar_line(line3_lv, line3_lc, line3_rv, line3_rc),
+                 bar_bot]:
+        print(f"{pad_b}{line}")
     print()
 
 
