@@ -62,45 +62,50 @@ def _double_sep(title=""):
         return f"{m}{GREEN}╠{l} {RED}{title}{GREEN} {r}╣{END}"
     return f"{m}{GREEN}╠{'═' * BOX_W}╣{END}"
 
-# ── Logo herradura (ASCII art) ───────────────────────────────────────────────
+# ── Logo herradura (braille art) ─────────────────────────────────────────────
 _LOGO_LINES = [
-    "      ╭─────────────────────────────╮",
-    "    ╭─╯                             ╰─╮",
-    "   ╭╯   ┌─────────────────────────┐   ╰╮",
-    "   │    │   H E R R A D U R A    │    │",
-    "   │    │     H A C K   v 5.0    │    │",
-    "   │    └─────────────────────────┘    │",
-    "    ╰─╮                             ╭─╯",
-    "      ╰──╮                       ╭──╯",
-    "          │                     │",
-    "          ╰─────────────────────╯",
+    "⠀⠀⠀⠀⢀⣠⣴⣶⣿⣿⣿⣿⣿⣿⣶⣦⣄⡀⠀⠀⠀⠀",
+    "⠀⠀⢀⣴⣿⣿⠿⢿⣿⣿⣉⣉⣿⣿⡿⠿⣿⣿⣦⡀⠀⠀",
+    "⠀⣴⣿⣿⣿⣇⣤⣾⣿⣿⣿⣿⣿⣿⣷⣤⣸⣿⣿⣿⣦⠀",
+    "⣰⣿⡿⠋⣻⣿⣿⠟⠉⠉⠀⠀⠉⠙⠻⣿⣿⣟⠙⢿⣿⣆",
+    "⣿⣿⣧⣴⣿⣿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⣿⣦⣼⣿⣿",
+    "⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿",
+    "⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿",
+    "⢻⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣿⣿⡟",
+    "⠈⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⠁",
+    "⠀⠹⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣿⣿⠏⠀",
+    "⠀⠀⠹⣿⣿⣿⣿⡄⠀⠀⠀⠀⠀⠀⢠⣿⣿⣿⣿⠏⠀⠀",
+    "⢠⣶⣶⣿⣿⣿⣿⣷⠀⠀⠀⠀⠀⠀⣾⣿⣿⣿⣿⣶⣶⡄",
+    "⠸⣿⣿⣿⣿⣿⣿⠟⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣿⣿⠇",
 ]
+_LOGO_W = 22
+
 
 def banner():
     os.system("clear")
-    tw = _tw()
+    tw  = _tw()
     now = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
     # ── Logo herradura centrado ───────────────────────────────────────────────
+    logo_pad = " " * max(0, (tw - _LOGO_W) // 2)
     print()
     for line in _LOGO_LINES:
-        lpad = " " * max(0, (tw - len(line)) // 2)
-        print(f"{GREEN}{lpad}{line}{END}")
+        print(f"{GREEN}{logo_pad}{line}{END}")
     print()
 
-    # ── Barra de info tipo terminal ───────────────────────────────────────────
-    bar_w = min(tw - 4, 72)           # ancho total incluyendo bordes │...│
-    inner = bar_w - 2                 # contenido visible entre │ y │
-    pad_b = " " * max(0, (tw - bar_w) // 2)
+    # ── Barra de info — misma anchura que el menú ─────────────────────────────
+    BW    = max(70, min(tw - 6, 96))   # igual que menu()
+    inn   = BW - 1                      # caracteres entre ╔ y ╗
+    pad_b = " " * max(0, (tw - (BW + 2)) // 2)   # mismo margen que el menú
+    inner = inn
 
     def _bar_line(left_vis, left_col, right_vis, right_col, fill="─"):
-        """Construye una fila de barra con relleno exacto."""
-        gap = inner - 2 - len(left_vis) - len(right_vis)  # 2 = leading spaces
+        gap = inner - 2 - len(left_vis) - len(right_vis)
         dashes = fill * max(1, gap)
         return f"{DIM}│{END}  {left_col}{DIM}{dashes}{END}{right_col}{DIM}│{END}"
 
-    bar_top  = f"{DIM}┌{'─'*inner}┐{END}"
-    bar_bot  = f"{DIM}└{'─'*inner}┘{END}"
+    bar_top = f"{DIM}┌{'─'*inner}┐{END}"
+    bar_bot = f"{DIM}└{'─'*inner}┘{END}"
 
     line1_lv = "[root@herradura]─[WiFi Pentest Suite]"
     line1_lc = f"{RED}[root@herradura]{END}{DIM}─{END}{GREEN}[WiFi Pentest Suite]{END}"
@@ -128,13 +133,15 @@ def banner():
 
 def menu():
     tw  = _tw()
-    BW  = max(70, min(tw - 6, 96))   # ancho dinámico según terminal
+    BW  = max(70, min(tw - 6, 96))
     inn = BW - 1
     m   = " " * max(0, (tw - (BW + 2)) // 2)
 
-    # Ancho de cada columna (la caja interna se divide en 2)
-    L_W = (BW - 1) // 2
-    R_W = BW - 1 - L_W
+    # Ancho de columnas: row2 = │·cL·padL│·cR·padR│ = 1+1+L_W+1+1+R_W+1 = L_W+R_W+5
+    # Para igualar box (inn+2): L_W+R_W = inn-3 = BW-4
+    col_w = BW - 4
+    L_W   = col_w // 2
+    R_W   = col_w - L_W
 
     # ── Helpers locales ───────────────────────────────────────────────────────
     def top():
@@ -154,12 +161,11 @@ def menu():
         return f"{m}{GREEN}╠{DIM}{l}{END} {RED}{title}{GREEN} {DIM}{r}{END}{GREEN}╣{END}"
 
     def full_row(vis, col):
-        """Fila que ocupa todo el ancho (sin columna derecha)."""
-        pad = inn - len(vis)
+        # │·col·pad│  =>  1+1+len(vis)+pad+1 = inn+2  =>  pad = inn-1-len(vis)
+        pad = inn - 1 - len(vis)
         return f"{m}{GREEN}│{END} {col}{' ' * max(0, pad)}{GREEN}│{END}"
 
     def row2(nL, nameL, descL, colL, nR, nameR, descR, colR):
-        """Fila de dos columnas con número, nombre y descripción corta."""
         visL = f"{nL} {nameL}  {descL}"
         visR = f"{nR} {nameR}  {descR}"
         padL = " " * max(0, L_W - len(visL))
@@ -189,33 +195,33 @@ def menu():
     print(row2("[ 7]", "Handshake WPA/WPA2",  "captura + crackea",         GREEN,
                "[ 9]", "PMKID",               "sin esperar clientes",      YELLOW))
     print(row2("[10]", "WPS Pixie / PIN",      "explota WPS del router",    GREEN,
-               "[15]", "Evil Twin + Portal",   "AP falso + portal web",     RED))
+               "[15]", "Evil Twin + Portal",   "AP falso + portal",         RED))
     print(row2("[21]", "KARMA / MANA",         "acepta cualquier probe",    RED,
                "[23]", "WPA Enterprise",       "captura hash MSCHAPv2",     MAGENTA))
     print(row2("[25]", "WEP Full Attack",      "ARP replay + crack",        GREEN,
                "[17]", "Auto-Crack",           "flujo completo automatico", YELLOW))
     print(row2("[13]", "Deautenticacion",      "desconecta clientes",       GREEN,
-               "[27]", "SSID Oculto Revealer", "revela SSIDs ocultos",      YELLOW))
+               "[27]", "SSID Oculto Revealer", "revela SSID oculto",        YELLOW))
 
     # ── AVANZADO / CVEs ───────────────────────────────────────────────────────
     print(dsep("◈  AVANZADO  /  CVEs  ◈"))
-    print(row2("[32]", "Vulns Modernas 2025",  "KRACK, Frag, Dragon",      RED,
-               "[34]", "Suite CVE 2019-2024",  "Kr00k, EAP, Frag",         MAGENTA))
-    print(row2("[28]", "Post-Explotacion",     "escanea la LAN interna",   RED,
-               "[26]", "Deauth Hopping",       "deauth multi-canal",        GREEN))
-    print(row2("[22]", "Probe Harvester",      "ve que redes buscan devs", YELLOW,
-               "[24]", "Wordlist OSINT",       "diccionario por SSID",     YELLOW))
+    print(row2("[32]", "Vulns Modernas 2025",  "KRACK, Frag, Dragon",       RED,
+               "[34]", "Suite CVE 2019-2024",  "Kr00k, EAP, Frag",          MAGENTA))
+    print(row2("[28]", "Post-Explotacion",     "escanea la LAN interna",    RED,
+               "[26]", "Deauth Hopping",       "deauth multi-canal",         GREEN))
+    print(row2("[22]", "Probe Harvester",      "ve que redes buscan devs",  YELLOW,
+               "[24]", "Wordlist OSINT",       "diccionario por SSID",      YELLOW))
 
     # ── HERRAMIENTAS ──────────────────────────────────────────────────────────
     print(dsep("◈  HERRAMIENTAS  ◈"))
-    print(row2("[ 1]", "Monitor ON",           "activa modo monitor",       GREEN,
-               "[ 2]", "Monitor OFF",          "vuelve a managed",          GREEN))
-    print(row2("[ 5]", "Escanear + CSV",       "escanea y guarda CSV",      GREEN,
-               "[ 6]", "Scan Vivo",            "tabla en tiempo real",      GREEN))
-    print(row2("[12]", "MAC Spoof",            "cambia tu MAC",             GREEN,
-               "[20]", "Dependencias",         "verifica herramientas",     CYAN))
-    print(row2("[29]", "Historial",            "claves y ataques guardados",CYAN,
-               "[30]", "Reporte HTML",         "informe profesional",       CYAN))
+    print(row2("[ 1]", "Monitor ON",           "activa modo monitor",        GREEN,
+               "[ 2]", "Monitor OFF",          "vuelve a managed",           GREEN))
+    print(row2("[ 5]", "Escanear + CSV",       "escanea y guarda CSV",       GREEN,
+               "[ 6]", "Scan Vivo",            "tabla en tiempo real",       GREEN))
+    print(row2("[12]", "MAC Spoof",            "cambia tu MAC",              GREEN,
+               "[20]", "Dependencias",         "verifica herramientas",      CYAN))
+    print(row2("[29]", "Historial",            "claves y ataques guardados", CYAN,
+               "[30]", "Reporte HTML",         "informe profesional",        CYAN))
 
     # ── Salir ─────────────────────────────────────────────────────────────────
     print(sep())
