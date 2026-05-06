@@ -242,7 +242,7 @@ class ExploitEngine:
             i += 1
             first = False
             time.sleep(0.12)
-        sys.stdout.write(f"\033[{total_lines}A" + ("\n" + " " * 90) * total_lines + "\r")
+        sys.stdout.write(f"\033[{total_lines}A" + (" " * 90 + "\n") * total_lines)
         sys.stdout.flush()
 
     def start(self):
@@ -257,7 +257,7 @@ class ExploitEngine:
         # Si el thread sigue vivo, limpiar pantalla a la fuerza
         if self._thread and self._thread.is_alive():
             try:
-                sys.stdout.write("\033[5A" + ("\n" + " " * 100) * 5 + "\r")
+                sys.stdout.write("\033[5A" + (" " * 100 + "\n") * 5)
                 sys.stdout.flush()
             except Exception:
                 pass
@@ -271,12 +271,6 @@ class ExploitEngine:
             _live_results_append(self.essid, self.bssid, result, method or "desconocido")
         time.sleep(0.3)
         self.stop()
-        # Limpiar líneas residuales del engine en pantalla
-        try:
-            sys.stdout.write("\033[4A" + ("\n" + " " * 100) * 4 + "\r")
-            sys.stdout.flush()
-        except Exception:
-            pass
         self.result = result
         self.method = method
 
