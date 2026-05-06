@@ -132,59 +132,102 @@ def banner():
 
 
 def menu():
-    L_W = 29
-    R_W = 30
+    tw  = _tw()
+    BW  = max(70, min(tw - 6, 96))   # ancho dinámico según terminal
+    inn = BW - 1
+    m   = " " * max(0, (tw - (BW + 2)) // 2)
 
-    def _r2(nL, nameL, colL, nR, nameR, colR):
-        m    = _margin()
-        visL = f"{nL} {nameL}"
-        visR = f"{nR} {nameR}"
+    # Ancho de cada columna (la caja interna se divide en 2)
+    L_W = (BW - 1) // 2
+    R_W = BW - 1 - L_W
+
+    # ── Helpers locales ───────────────────────────────────────────────────────
+    def top():
+        return f"{m}{GREEN}╔{'═' * inn}╗{END}"
+
+    def bot():
+        return f"{m}{GREEN}╚{'═' * inn}╝{END}"
+
+    def sep():
+        return f"{m}{GREEN}├{DIM}{'─' * inn}{END}{GREEN}┤{END}"
+
+    def dsep(title=""):
+        tv  = len(f" {title} ")
+        pad = inn - tv
+        l   = '═' * (pad // 2)
+        r   = '═' * (pad - pad // 2)
+        return f"{m}{GREEN}╠{DIM}{l}{END} {RED}{title}{GREEN} {DIM}{r}{END}{GREEN}╣{END}"
+
+    def full_row(vis, col):
+        """Fila que ocupa todo el ancho (sin columna derecha)."""
+        pad = inn - len(vis)
+        return f"{m}{GREEN}│{END} {col}{' ' * max(0, pad)}{GREEN}│{END}"
+
+    def row2(nL, nameL, descL, colL, nR, nameR, descR, colR):
+        """Fila de dos columnas con número, nombre y descripción corta."""
+        visL = f"{nL} {nameL}  {descL}"
+        visR = f"{nR} {nameR}  {descR}"
         padL = " " * max(0, L_W - len(visL))
         padR = " " * max(0, R_W - len(visR))
-        cL   = f"{colL}{nL}{END} {WHITE}{nameL}{END}"
-        cR   = f"{colR}{nR}{END} {WHITE}{nameR}{END}"
-        return (f"{m}{GREEN}│{END} {cL}{padL}"
-                f"{GREEN}│{END} {cR}{padR}{GREEN}│{END}")
+        cL   = (f"{colL}{nL}{END} {WHITE}{nameL}{END}"
+                f"  {DIM}{descL}{END}")
+        cR   = (f"{colR}{nR}{END} {WHITE}{nameR}{END}"
+                f"  {DIM}{descR}{END}")
+        return f"{m}{GREEN}│{END} {cL}{padL}{GREEN}│{END} {cR}{padR}{GREEN}│{END}"
 
     # ── Cabecera ──────────────────────────────────────────────────────────────
-    print(_top())
-    wv = "[W]  ▶  MODO GUIADO COMPLETO  ──  ARSENAL TOTAL AUTOMATICO"
-    wc = (f"{GREEN}[W]{END}  {RED}▶{END}  {WHITE}MODO GUIADO COMPLETO{END}"
-          f"  {DIM}──  ARSENAL TOTAL AUTOMATICO{END}")
-    print(_row(wv, wc))
+    print(top())
+    wv = "[W]  ▶  MODO GUIADO  ──  escanea, elige objetivo y ataca todo solo"
+    wc = (f"{GREEN}[W]{END}  {RED}▶{END}  {WHITE}MODO GUIADO{END}"
+          f"  {DIM}──  escanea, elige objetivo y ataca todo solo{END}")
+    print(full_row(wv, wc))
 
     # ── AUTOMÁTICOS ───────────────────────────────────────────────────────────
-    print(_double_sep(title="◈  AUTOMATICOS  ◈"))
-    print(_r2("[31]", "Auto-Pwner",           RED,     "[33]", "Auditoria Express",       CYAN))
-    print(_r2("[35]", "Exploit Engine AUTO",  GREEN,   "[36]", "Exploit Engine MASIVO",   GREEN))
+    print(dsep("◈  AUTOMATICOS  ◈"))
+    print(row2("[31]", "Auto-Pwner",           "escanea y ataca solo",      RED,
+               "[33]", "Auditoria Express",    "analiza sin atacar",        CYAN))
+    print(row2("[35]", "Exploit Engine AUTO",  "todos los vectores",        GREEN,
+               "[36]", "Exploit Engine MASIVO","multiples redes",           GREEN))
 
     # ── ATAQUES WiFi ──────────────────────────────────────────────────────────
-    print(_double_sep(title="◈  ATAQUES  WiFi  ◈"))
-    print(_r2("[ 7]", "Handshake WPA/WPA2",   GREEN,   "[ 9]", "PMKID  (sin clientes)",   YELLOW))
-    print(_r2("[10]", "WPS Pixie / PIN",       GREEN,   "[15]", "Evil Twin + Portal",      RED))
-    print(_r2("[21]", "KARMA / MANA",          RED,     "[23]", "WPA Enterprise",          MAGENTA))
-    print(_r2("[25]", "WEP Full Attack",       GREEN,   "[17]", "Auto-Crack",              YELLOW))
-    print(_r2("[13]", "Deautenticacion",       GREEN,   "[27]", "SSID Oculto Revealer",    YELLOW))
+    print(dsep("◈  ATAQUES  WiFi  ◈"))
+    print(row2("[ 7]", "Handshake WPA/WPA2",  "captura + crackea clave",   GREEN,
+               "[ 9]", "PMKID",               "sin esperar clientes",      YELLOW))
+    print(row2("[10]", "WPS Pixie / PIN",      "explota WPS del router",    GREEN,
+               "[15]", "Evil Twin + Portal",   "red falsa + pagina login",  RED))
+    print(row2("[21]", "KARMA / MANA",         "acepta cualquier probe",    RED,
+               "[23]", "WPA Enterprise",       "captura hash MSCHAPv2",     MAGENTA))
+    print(row2("[25]", "WEP Full Attack",      "ARP replay + crack",        GREEN,
+               "[17]", "Auto-Crack",           "flujo completo automatico", YELLOW))
+    print(row2("[13]", "Deautenticacion",      "desconecta clientes",       GREEN,
+               "[27]", "SSID Oculto Revealer", "revela SSIDs escondidos",   YELLOW))
 
     # ── AVANZADO / CVEs ───────────────────────────────────────────────────────
-    print(_double_sep(title="◈  AVANZADO  /  CVEs  ◈"))
-    print(_r2("[32]", "Vulns Modernas 2025",   RED,     "[34]", "Suite CVE 2019-2024",     MAGENTA))
-    print(_r2("[28]", "Post-Explotacion",      RED,     "[26]", "Deauth Hopping",          GREEN))
-    print(_r2("[22]", "Probe Harvester",       YELLOW,  "[24]", "Wordlist OSINT",          YELLOW))
+    print(dsep("◈  AVANZADO  /  CVEs  ◈"))
+    print(row2("[32]", "Vulns Modernas 2025",  "KRACK, Frag, Dragonblood", RED,
+               "[34]", "Suite CVE 2019-2024",  "Kr00k, EAP, FragAttacks",  MAGENTA))
+    print(row2("[28]", "Post-Explotacion",     "escanea la LAN interna",   RED,
+               "[26]", "Deauth Hopping",       "deauth multi-canal",        GREEN))
+    print(row2("[22]", "Probe Harvester",      "ve que redes buscan devs", YELLOW,
+               "[24]", "Wordlist OSINT",       "diccionario por SSID",     YELLOW))
 
     # ── HERRAMIENTAS ──────────────────────────────────────────────────────────
-    print(_double_sep(title="◈  HERRAMIENTAS  ◈"))
-    print(_r2("[ 1]", "Monitor ON",            GREEN,   "[ 2]", "Monitor OFF",             GREEN))
-    print(_r2("[ 5]", "Escanear + CSV",        GREEN,   "[ 6]", "Scan Vivo",               GREEN))
-    print(_r2("[12]", "MAC Spoof",             GREEN,   "[20]", "Dependencias",            CYAN))
-    print(_r2("[29]", "Historial",             CYAN,    "[30]", "Reporte HTML",            CYAN))
+    print(dsep("◈  HERRAMIENTAS  ◈"))
+    print(row2("[ 1]", "Monitor ON",           "activa modo monitor",       GREEN,
+               "[ 2]", "Monitor OFF",          "vuelve a managed",          GREEN))
+    print(row2("[ 5]", "Escanear + CSV",       "escanea y guarda CSV",      GREEN,
+               "[ 6]", "Scan Vivo",            "tabla en tiempo real",      GREEN))
+    print(row2("[12]", "MAC Spoof",            "cambia tu MAC",             GREEN,
+               "[20]", "Dependencias",         "verifica herramientas",     CYAN))
+    print(row2("[29]", "Historial",            "claves y ataques guardados",CYAN,
+               "[30]", "Reporte HTML",         "informe profesional",       CYAN))
 
     # ── Salir ─────────────────────────────────────────────────────────────────
-    print(_sep())
+    print(sep())
     sv = "[0]  ■  SALIR"
     sc = f"{RED}[0]{END}  {DIM}■{END}  {RED}SALIR{END}"
-    print(_row(sv, sc))
-    print(_bot())
+    print(full_row(sv, sc))
+    print(bot())
     print()
 
 
