@@ -62,43 +62,35 @@ def _double_sep(title=""):
         return f"{m}{GREEN}╠{l} {RED}{title}{GREEN} {r}╣{END}"
     return f"{m}{GREEN}╠{'═' * BOX_W}╣{END}"
 
-# ── ASCII Art: "HACK" en letras grandes ──────────────────────────────────────
-_HACK_LINES = [
-    " _   _   _    ____  _  __",
-    "| | | | / \\  / ___|| |/ /",
-    "| |_| |/ _ \\| |    | ' / ",
-    "|  _  / ___ \\ |___ | . \\ ",
-    "|_| |_/_/   \\_\\____|_|\\_\\",
+# ── Logo herradura (braille art) ─────────────────────────────────────────────
+_LOGO_LINES = [
+    "⠀⠀⠀⠀⢀⣠⣴⣶⣿⣿⣿⣿⣿⣿⣶⣦⣄⡀⠀⠀⠀⠀",
+    "⠀⠀⢀⣴⣿⣿⠿⢿⣿⣿⣉⣉⣿⣿⡿⠿⣿⣿⣦⡀⠀⠀",
+    "⠀⣴⣿⣿⣿⣇⣤⣾⣿⣿⣿⣿⣿⣿⣷⣤⣸⣿⣿⣿⣦⠀",
+    "⣰⣿⡿⠋⣻⣿⣿⠟⠉⠉⠀⠀⠉⠙⠻⣿⣿⣟⠙⢿⣿⣆",
+    "⣿⣿⣧⣴⣿⣿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⣿⣦⣼⣿⣿",
+    "⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿",
+    "⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿",
+    "⢻⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣿⣿⡟",
+    "⠈⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⠁",
+    "⠀⠹⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣿⣿⠏⠀",
+    "⠀⠀⠹⣿⣿⣿⣿⡄⠀⠀⠀⠀⠀⠀⢠⣿⣿⣿⣿⠏⠀⠀",
+    "⢠⣶⣶⣿⣿⣿⣿⣷⠀⠀⠀⠀⠀⠀⣾⣿⣿⣿⣿⣶⣶⡄",
+    "⠸⣿⣿⣿⣿⣿⣿⠟⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣿⣿⠇",
 ]
-
-# ── Señal WiFi decorativa (arriba del texto HACK) ────────────────────────────
-_WIFI_RINGS = [
-    "          . : : . : : . : : .",
-    "       .:    ( (  WiFi  ) )    :.",
-    "     .:   (    ───────────    )   :.",
-    "    :.   (   [ HERRADURA ]   )   .:",
-    "     ':   (    ───────────    )   :'",
-    "       ':    ( (  v5.0  ) )    :'",
-    "          ' : : ' : : ' : : '",
-]
+# Ancho visual del logo (cada char braille ocupa 1 col)
+_LOGO_W = 22
 
 def banner():
     os.system("clear")
     tw = _tw()
     now = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
-    # ── Anillos WiFi ─────────────────────────────────────────────────────────
-    ring_colors = [DIM, CYAN, CYAN, GREEN, CYAN, CYAN, DIM]
+    # ── Logo herradura centrado ───────────────────────────────────────────────
+    logo_pad = " " * max(0, (tw - _LOGO_W) // 2)
     print()
-    for line, col in zip(_WIFI_RINGS, ring_colors):
-        pad = " " * max(0, (tw - len(line)) // 2)
-        print(f"{col}{pad}{line}{END}")
-
-    # ── "HACK" en ASCII grande ────────────────────────────────────────────────
-    print()
-    for line in _HACK_LINES:
-        pad = " " * max(0, (tw - len(line)) // 2)
-        print(f"{GREEN}{pad}{line}{END}")
+    for line in _LOGO_LINES:
+        print(f"{GREEN}{logo_pad}{line}{END}")
     print()
 
     # ── Barra de info tipo terminal ───────────────────────────────────────────
