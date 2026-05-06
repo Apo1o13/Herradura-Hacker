@@ -2125,11 +2125,11 @@ def pmkid_attack():
             return
 
     interfaz = select_interface()
-    bssid = ask("BSSID objetivo (Enter = capturar todos en rango)")
-    if bssid and not validate_bssid(bssid):
-        error("Formato de BSSID inválido.")
-        pause_back()
-        return
+    step(1, "Escaneando redes para seleccionar objetivo PMKID...")
+    bssid, _pmkid_ch, _pmkid_ssid = select_target_from_scan(interfaz)
+    bssid = bssid or ""
+    if not bssid:
+        info("Sin objetivo — capturando PMKID de TODAS las redes en rango.")
 
     t = ask("Tiempo de captura en segundos (recomendado: 60)")
     try:
@@ -2399,11 +2399,11 @@ def fake_ap():
 
     mdk = "mdk4" if check_tool("mdk4") else "mdk3"
     interfaz = select_interface()
-    channel = ask("Canal (1-13, recomendado: 6)")
+    channel = ask("Canal para el beacon flood (Enter = 6)")
+    if not channel:
+        channel = "6"
     if not validate_channel(channel):
-        error("Canal inválido.")
-        pause_back()
-        return
+        channel = "6"
 
     print(f"\n  {WHITE}[1]{END} Usar diccionario de SSIDs existente")
     print(f"  {WHITE}[2]{END} Crear diccionario ahora\n")
@@ -3694,9 +3694,9 @@ def karma_attack():
             pause_back()
             return
 
-    iface_ap  = ask("Interfaz para el AP KARMA (ej: wlan0)")
-    iface_net = ask("Interfaz con internet real (Enter para omitir)")
-    channel   = ask("Canal (recomendado: 6)")
+    iface_ap  = select_interface()
+    iface_net = ask("Interfaz con internet real para NAT (Enter = omitir)")
+    channel   = ask("Canal para el AP KARMA (Enter = 6)")
     if not validate_channel(channel):
         channel = "6"
 
@@ -3867,11 +3867,13 @@ def wpa_enterprise_attack():
         pause_back()
         return
 
-    iface  = ask("Interfaz WiFi (ej: wlan0)")
-    essid  = ask("SSID de la red corporativa a clonar")
-    channel = ask("Canal de la red")
-    if not validate_channel(channel):
-        channel = "6"
+    iface = select_interface()
+    step(1, "Escaneando redes corporativas objetivo...")
+    bssid, channel, essid = select_target_from_scan(iface)
+    if not bssid or not essid:
+        error("Sin objetivo válido. Se requiere SSID para clonar la red corporativa.")
+        pause_back()
+        return
 
     os.makedirs("/tmp/herradura_wpe", exist_ok=True)
     log_file = "/tmp/herradura_wpe/wpe.log"
