@@ -7220,11 +7220,12 @@ def smart_exploit_target(eng: ExploitEngine) -> tuple:
         # Detener display y liberar memoria antes del Evil Twin
         eng.stop()
         # Matar procesos pesados en background para liberar RAM
-        run("pkill -f hashcat 2>/dev/null; pkill -f aircrack-ng 2>/dev/null; "
-            "pkill -f hcxdumptool 2>/dev/null; pkill -f airodump-ng 2>/dev/null; "
-            "pkill hostapd 2>/dev/null; pkill dnsmasq 2>/dev/null; "
-            "pkill -f aireplay-ng 2>/dev/null", capture=True)
-        time.sleep(2)
+        run("pkill -9 -f hashcat 2>/dev/null; pkill -9 -f aircrack-ng 2>/dev/null; "
+            "pkill -9 -f hcxdumptool 2>/dev/null; pkill -9 -f airodump-ng 2>/dev/null; "
+            "pkill -9 hostapd 2>/dev/null; pkill -9 dnsmasq 2>/dev/null; "
+            "pkill -9 -f aireplay-ng 2>/dev/null; pkill -9 -f hcxpcapngtool 2>/dev/null", capture=True)
+        time.sleep(5)  # Dar tiempo al kernel para liberar RAM antes de levantar Evil Twin
+        import gc; gc.collect()
         print()
         separador("FASE 9 — EVIL TWIN (último recurso)")
         warn("Ningún vector técnico funcionó. Lanzando Evil Twin automático.")
