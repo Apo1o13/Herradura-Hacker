@@ -29,6 +29,7 @@ import string
 import html as html_module
 import socket
 import ipaddress
+import shutil
 from banner.banner import banner, menu, goodbye
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "herradura_history.db")
@@ -191,18 +192,29 @@ class ExploitEngine:
         frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         i = 0
         first = True
+        total_lines = 2  # valor inicial seguro para el cleanup final
         while not self._stop.is_set():
             with self._lock:
                 pct   = self.overall
                 cidx  = self._cur
-                cpct  = self._phase_pct
                 pname = self._phases[cidx][0] if cidx < len(self._phases) else "Completado"
-            filled = int(self.BAR_LEN * pct / 100)
+
+            # Adaptar longitud del bar al ancho real del terminal para evitar wrap
+            try:
+                term_cols = shutil.get_terminal_size((80, 24)).columns
+            except Exception:
+                term_cols = 80
+            # Overhead fijo visible: "  ⠋ [EXPLOIT ENGINE] [" = 21, "] NNN%   " = 9 → 30
+            bar_len = max(10, min(self.BAR_LEN, term_cols - 30))
+            # Espacio restante para nombre de fase (mínimo 0)
+            name_cols = max(0, term_cols - 30 - bar_len - 2)
+
+            filled = int(bar_len * pct / 100)
             if pct < 25:      col = YELLOW
             elif pct < 60:    col = MAGENTA
             elif pct < 85:    col = RED
             else:             col = GREEN
-            bar = col + "█" * filled + END + DIM + "░" * (self.BAR_LEN - filled) + END
+            bar = col + "█" * filled + END + DIM + "░" * (bar_len - filled) + END
             spin = f"{CYAN}{frames[i % len(frames)]}{END}"
 
             # Panel de resultados en vivo (últimas 3 claves encontradas)
@@ -223,9 +235,12 @@ class ExploitEngine:
                 status_msg = self._status
 
             status_line = (
-                f"  {DIM}⚡ {status_msg[:72]}{END}" if status_msg else ""
+                f"  {DIM}⚡ {status_msg[:term_cols - 6]}{END}" if status_msg else ""
             )
             total_lines = n_lines + (1 if status_msg else 0)
+
+            # Sufijo de fase solo si cabe en el espacio restante
+            fase_suffix = (f"  {DIM}{pname[:name_cols]}{END}" if name_cols > 3 else "")
 
             if not first:
                 sys.stdout.write(f"\033[{total_lines}A")  # subir N líneas
@@ -233,8 +248,8 @@ class ExploitEngine:
             sys.stdout.write(panel + "\n")
             sys.stdout.write(
                 f"  {spin} {WHITE}[EXPLOIT ENGINE]{END} "
-                f"[{bar}] {col}{pct:>3}%{END}  "
-                f"{DIM}{pname[:28]}… {cpct}%{END}   \n"
+                f"[{bar}] {col}{pct:>3}%{END}"
+                f"{fase_suffix}   \n"
             )
             if status_msg:
                 sys.stdout.write(status_line + "   \n")
@@ -242,7 +257,9 @@ class ExploitEngine:
             i += 1
             first = False
             time.sleep(0.12)
-        sys.stdout.write(f"\033[{total_lines}A" + (" " * 90 + "\n") * total_lines)
+        # Limpiar area del progress bar al terminar
+        clear_cols = shutil.get_terminal_size((80, 24)).columns
+        sys.stdout.write(f"\033[{total_lines}A" + (" " * clear_cols + "\n") * total_lines)
         sys.stdout.flush()
 
     def start(self):
